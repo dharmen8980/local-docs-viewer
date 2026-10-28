@@ -174,6 +174,16 @@ def mount_ui(app: FastAPI, ui_dir: str) -> None:
             return JSONResponse({"detail": msg}, status_code=503)
 
 
+def make_pdf_renderer(settings: Settings):
+    """--desktop: rendered by the Electron shell over its bridge; else Playwright + system Chrome
+    (playwright itself is only imported on the first export)."""
+    if settings.desktop:
+        from .desktop import BridgeClient, BridgePdfRenderer  # local: desktop imports roots imports app
+
+        return BridgePdfRenderer(settings.port, BridgeClient(settings.bridge_url, settings.bridge_token))
+    return PdfRenderer(settings.port)
+
+
 def create_app(settings: Settings) -> FastAPI:
     if settings.root is None:
         raise ValueError("create_app needs a root (RootSwitcher serves the no-folder mode)")
@@ -183,7 +193,7 @@ def create_app(settings: Settings) -> FastAPI:
     editor = Editor(settings, guard, store) if settings.allow_edit else None
     index = SearchIndex(store, settings.search_max_bytes)
     repo_prefix = find_repo_prefix(settings.root)
-    pdf = PdfRenderer(settings.port)
+    pdf = make_pdf_renderer(settings)
     closing = asyncio.Event()  # set on lifespan shutdown: ends this app's SSE streams (root switch)
 
     async def on_change(ch: Change) -> None:

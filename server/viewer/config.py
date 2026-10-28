@@ -10,7 +10,7 @@ import os
 import secrets
 import sys
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 HOST = "127.0.0.1"  # hardcoded on purpose: never configurable
@@ -125,6 +125,10 @@ class Settings:
     edit_max_bytes: int = EDIT_MAX_BYTES
     lock_root: bool = False  # --lock-root: the browser cannot switch folders
     root_source: str = ""  # "cli" | "env" | "state" | "" (none)
+    # --desktop: run under the Electron shell; folder dialog + PDF go through its loopback bridge
+    desktop: bool = False
+    bridge_url: str = ""  # DOCS_VIEWER_BRIDGE_URL, http://127.0.0.1:<port>
+    bridge_token: str = field(default="", repr=False)  # DOCS_VIEWER_BRIDGE_TOKEN (never logged)
 
     def __post_init__(self) -> None:
         self.root = canonical_path(self.root) if self.root is not None else None
@@ -203,6 +207,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="allowed upload extension (repeatable or comma-separated; replaces the default list)")
     p.add_argument("--lock-root", action="store_true", default=None,
                    help="do not let the browser switch folders (env DOCS_VIEWER_LOCK_ROOT=1; needs a root)")
+    p.add_argument("--desktop", action="store_true", default=None,
+                   help="run as the desktop app's server (env DOCS_VIEWER_DESKTOP=1; needs DOCS_VIEWER_BRIDGE_URL "
+                        "and DOCS_VIEWER_BRIDGE_TOKEN; prints LDV_READY <url> and exits when stdin closes)")
     return p
 
 
@@ -260,6 +267,7 @@ def settings_from_args(argv: list[str] | None = None, env: dict | None = None) -
         last = load_state(canonical_path(data_dir))["last_root"]
         root, source = (last, "state") if last and os.path.isdir(last) else (None, "")
     port = a.port if a.port is not None else int(env.get("DOCS_VIEWER_PORT") or DEFAULT_PORT)
+    desktop = bool(a.desktop) or _truthy(env.get("DOCS_VIEWER_DESKTOP"))
     mb = a.search_max_mb if a.search_max_mb is not None else float(
         env.get("DOCS_VIEWER_SEARCH_MAX_MB") or DEFAULT_SEARCH_MAX_MB)
     return Settings.make(
@@ -278,4 +286,7 @@ def settings_from_args(argv: list[str] | None = None, env: dict | None = None) -
         upload_ext=tuple(e for v in a.upload_ext for e in _split_env(v)) if a.upload_ext else DEFAULT_UPLOAD_EXT,
         lock_root=bool(a.lock_root) or _truthy(env.get("DOCS_VIEWER_LOCK_ROOT")),
         root_source=source,
+        desktop=desktop,
+        bridge_url=(env.get("DOCS_VIEWER_BRIDGE_URL") or "").strip() if desktop else "",
+        bridge_token=(env.get("DOCS_VIEWER_BRIDGE_TOKEN") or "").strip() if desktop else "",
     )

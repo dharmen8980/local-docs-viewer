@@ -1,0 +1,110 @@
+# Desktop app: test, build (macOS arm64 + x64 dmg, Linux AppImage + deb), smoke-test the packaged
+# app, and on a v* tag attach everything to a GitHub Release. Unsigned (no Developer ID): see
+# README "Desktop app". workflow_dispatch builds without releasing.
+# Actions are pinned to commit SHAs (Dependabot keeps them current: .github/dependabot.yml).
+name: desktop-release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macos-arm64, os: macos-14, target: mac }
+          - { name: macos-x64, os: macos-15-intel, target: mac } # macos-13 (last Intel image) is retired
+          - { name: linux-x64, os: ubuntu-22.04, target: linux }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      ELECTRON_BUILDER_PUBLISH: never
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      # No dependency caches: a cache poisoned by another run must not reach the shipped binaries.
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          enable-cache: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Python tests
+        run: |
+          uv sync --locked
+          uv run pytest -q
+
+      - name: Desktop install + unit tests
+        working-directory: desktop
+        run: |
+          npm ci
+          npm test
+
+      - name: Version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: desktop
+        run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
+
+      - name: Build (web, frozen server, Electron package)
+        working-directory: desktop
+        run: npm run dist:${{ matrix.target }}
+
+      - name: Smoke test the packaged app (macOS)
+        if: matrix.target == 'mac'
+        working-directory: desktop
+        run: node e2e/smoke.mjs --packaged
+
+      - name: Smoke test the packaged app (Linux, Xvfb)
+        if: matrix.target == 'linux'
+        working-directory: desktop
+        run: xvfb-run -a node e2e/smoke.mjs --packaged
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-${{ matrix.name }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            desktop/release/*.dmg
+            desktop/release/*.AppImage
+            desktop/release/*.deb
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: desktop-*
+          path: artifacts
+          merge-multiple: true
+      - run: ls -la artifacts && (cd artifacts && sha256sum * > SHA256SUMS.txt)
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          draft: true
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/*.dmg
+            artifacts/*.AppImage
+            artifacts/*.deb
+            artifacts/SHA256SUMS.txt

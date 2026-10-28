@@ -1,0 +1,34 @@
+{
+  "name": "local-docs-viewer-desktop",
+  "productName": "Local Docs Viewer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Desktop shell (Electron) for local-docs-viewer",
+  "license": "MIT",
+  "author": "dharmen8980",
+  "homepage": "https://github.com/dharmen8980/local-docs-viewer",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p .",
+    "typecheck": "tsc -p . --noEmit",
+    "lint": "tsc -p . --noEmit",
+    "start": "npm run build && electron .",
+    "test": "npm run build && node --test test/",
+    "icon": "electron scripts/make-icon.js",
+    "build:server": "bash scripts/build-server.sh",
+    "dist": "node scripts/dist.mjs",
+    "dist:mac": "node scripts/dist.mjs mac",
+    "dist:linux": "node scripts/dist.mjs linux",
+    "e2e": "npm run build && node e2e/smoke.mjs",
+    "e2e:packaged": "node e2e/smoke.mjs --packaged"
+  },
+  "devDependencies": {
+    "@electron/fuses": "^2.1.3",
+    "@types/node": "^26.6.6",
+    "electron": "^45.1.0",
+    "electron-builder": "^26.18.0",
+    "playwright-core": "^1.64.1",
+    "typescript": "^7.0.2"
+  },
+  "desktopName": "local-docs-viewer.desktop"
+}

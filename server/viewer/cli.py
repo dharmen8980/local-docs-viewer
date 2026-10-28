@@ -13,9 +13,34 @@ from .config import HOST, ConfigError, settings_from_args
 from .roots import RootSwitcher
 
 
+def self_check() -> None:
+    """Hidden `--self-check` (packaging): the frozen binary has the app, SQLite FTS5 and no playwright."""
+    import importlib.util
+    import sqlite3
+
+    from . import app, desktop  # noqa: F401 - import errors are the check
+
+    db = sqlite3.connect(":memory:")
+    db.execute("CREATE VIRTUAL TABLE t USING fts5(body)")
+    db.execute("INSERT INTO t VALUES ('hello frozen world')")
+    assert db.execute("SELECT count(*) FROM t WHERE t MATCH 'frozen'").fetchone()[0] == 1
+    frozen = getattr(sys, "frozen", False)
+    if frozen and importlib.util.find_spec("playwright") is not None:
+        sys.exit("[viewer] self-check: playwright is bundled")
+    print(f"LDV_SELF_CHECK ok sqlite {sqlite3.sqlite_version} fts5 python {sys.version.split()[0]}"
+          f"{' frozen' if frozen else ''}")
+
+
 def main(argv: list[str] | None = None) -> None:
+    if (sys.argv[1:] if argv is None else argv) == ["--self-check"]:
+        return self_check()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     settings = settings_from_args(argv)
+    if settings.desktop:
+        from .desktop import check_bridge
+
+        if err := check_bridge(settings.bridge_url, settings.bridge_token):
+            sys.exit(f"[viewer] {err}")
     if settings.root is not None and not os.path.isdir(settings.root):
         sys.exit(f"root folder not found: {settings.root}")
     if settings.root is not None and settings.root_source == "state":
@@ -45,10 +70,27 @@ def main(argv: list[str] | None = None) -> None:
         print(f"[viewer] note: data dir {settings.data_dir} overlaps the root; it is hidden from the viewer", file=sys.stderr)
     if settings.lock_root:
         print("[viewer] folder switching disabled (--lock-root)", file=sys.stderr)
+    if settings.desktop:
+        return _run_desktop(settings)
     print(f"[viewer] open http://{HOST}:{settings.port}/", file=sys.stderr)
     app = RootSwitcher(settings)
     uvicorn.run(app, host=HOST, port=settings.port, log_level="info", lifespan="on",
                 proxy_headers=False, server_header=False, timeout_graceful_shutdown=3)
+
+
+def _run_desktop(settings) -> None:
+    """Child of the Electron shell: bridge picker + renderer, ready line on stdout, exit on stdin EOF."""
+    from .desktop import GRACEFUL_S, BridgeClient, bridge_picker, make_server, start_stdin_watchdog
+
+    print(f"[viewer] desktop mode; bridge {settings.bridge_url}", file=sys.stderr)
+    app = RootSwitcher(settings, picker=bridge_picker(BridgeClient(settings.bridge_url, settings.bridge_token)))
+    config = uvicorn.Config(app, host=HOST, port=settings.port, log_level="info", lifespan="on",
+                            proxy_headers=False, server_header=False, timeout_graceful_shutdown=GRACEFUL_S)
+    server = make_server(config, settings.port)
+    start_stdin_watchdog(server)
+    server.run()
+    if not server.started:
+        sys.exit("[viewer] server did not start (see the log above)")
 
 
 if __name__ == "__main__":

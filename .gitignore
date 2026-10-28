@@ -15,3 +15,11 @@ __pycache__/
 .DS_Store
 .env
 .env.*
+
+# desktop app build outputs (desktop/build/icon.* are sources)
+desktop/node_modules/
+desktop/dist/
+desktop/release/
+desktop/build/server/
+desktop/build/pyenv/
+desktop/build/pyinstaller/

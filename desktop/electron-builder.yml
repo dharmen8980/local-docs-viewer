@@ -1,0 +1,45 @@
+# electron-builder: macOS dmg (arm64 / x64, one per build: the frozen Python server is per-arch),
+# Linux AppImage + deb. Unsigned: no Developer ID; after-pack.js flips the Electron fuses and
+# ad-hoc signs the macOS bundle so it launches on Apple Silicon. Build: npm run dist.
+appId: io.github.dharmen8980.localdocsviewer
+productName: Local Docs Viewer
+copyright: MIT License
+directories:
+  output: release
+  buildResources: build
+asar: true
+files:
+  - dist/**/*.js
+  - package.json
+  - "!**/*.map"
+extraResources:
+  - from: build/server/viewer-server # scripts/build-server.sh (PyInstaller onedir)
+    to: server/viewer-server
+  - from: ../web/out # `npm ci && npm run build` in web/
+    to: web/out
+afterPack: scripts/after-pack.js
+npmRebuild: false
+publish: null
+artifactName: local-docs-viewer-${version}-${os}-${arch}.${ext}
+mac:
+  target: dmg # arch from the CLI (--arm64 / --x64): scripts/dist.mjs passes the host arch
+  category: public.app-category.productivity
+  icon: build/icon.png
+  identity: null # no Developer ID: signed ad-hoc in after-pack.js
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  darkModeSupport: true
+  minimumSystemVersion: "12.0"
+dmg:
+  writeUpdateInfo: false
+linux:
+  target: [AppImage, deb]
+  category: Utility
+  executableName: local-docs-viewer
+  syncDesktopName: true # WM_CLASS = desktopName (package.json): the window links to its .desktop entry
+  icon: build/icon.png
+  maintainer: dharmen8980 <dharmen8980@users.noreply.github.com>
+  synopsis: Local-only viewer for a folder of docs
+  description: Browse, search and export a local docs folder (Markdown, Mermaid, CSV, XLSX, PDF). Read-only unless editing is enabled.
+deb:
+  depends: [libgtk-3-0, libnotify4, libnss3, libxss1, libxtst6, xdg-utils, libatspi2.0-0, libuuid1, libsecret-1-0]

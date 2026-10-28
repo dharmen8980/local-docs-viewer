@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4f6bd8"/>
+      <stop offset="1" stop-color="#2f428f"/>
+    </linearGradient>
+    <linearGradient id="page" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e8ecf8"/>
+    </linearGradient>
+  </defs>
+  <!-- macOS grid: 824px rounded square centred on a 1024 canvas -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <path d="M332 232h264l136 136v400a24 24 0 0 1-24 24H332a24 24 0 0 1-24-24V256a24 24 0 0 1 24-24z" fill="url(#page)"/>
+  <path d="M596 232v112a24 24 0 0 0 24 24h112z" fill="#b9c4ea"/>
+  <g stroke="#4f6bd8" stroke-width="28" stroke-linecap="round">
+    <path d="M380 470h232"/>
+    <path d="M380 546h264"/>
+    <path d="M380 622h200"/>
+  </g>
+  <path d="M380 394h120" stroke="#2f428f" stroke-width="36" stroke-linecap="round"/>
+</svg>

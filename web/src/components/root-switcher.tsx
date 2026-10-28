@@ -24,6 +24,9 @@ export function reloadHome() {
   window.location.assign("/");
 }
 
+/** Window event the desktop app's File > Open Folder... menu dispatches (from its main process). */
+export const PICK_FOLDER_EVENT = "ldv:pick-folder";
+
 const base = (p: string) => p.replace(/[/\\]+$/, "").split(/[/\\]/).pop() || p;
 
 export interface RootActionOpts {
@@ -111,6 +114,26 @@ export function useRootActions({ beforeSwitch, onLeave }: RootActionOpts = {}) {
   }, []);
 
   return { info, load, picking, busy, pick, switchTo, forget };
+}
+
+/** Desktop app menu: same flow as "Choose folder..." (the server still opens the dialog). */
+function useMenuPick(pick: () => Promise<void>) {
+  const pickRef = useRef(pick);
+  useEffect(() => {
+    pickRef.current = pick;
+  }, [pick]);
+  useEffect(() => {
+    const onPick = () => void pickRef.current();
+    window.addEventListener(PICK_FOLDER_EVENT, onPick);
+    return () => window.removeEventListener(PICK_FOLDER_EVENT, onPick);
+  }, []);
+}
+
+/** Always-mounted listener for the desktop menu's Open Folder... in the shell: the sidebar (and its
+ * RootSwitcher) is an unmounted sheet on narrow windows. Exactly one per page (NoRootView has its own). */
+export function MenuFolderPick(opts: RootActionOpts) {
+  useMenuPick(useRootActions(opts).pick);
+  return null;
 }
 
 /** Folder switcher next to the root name in the sidebar header. */
@@ -202,6 +225,7 @@ export function RootSwitcher({ rootPath, ...opts }: RootActionOpts & { rootPath:
 /** Shown instead of the tree and content when the server has no folder selected. */
 export function NoRootView({ switchEnabled }: { switchEnabled: boolean }) {
   const { info, load, picking, busy, pick, switchTo, forget } = useRootActions();
+  useMenuPick(pick);
   useEffect(() => {
     if (switchEnabled) void load();
   }, [switchEnabled, load]);

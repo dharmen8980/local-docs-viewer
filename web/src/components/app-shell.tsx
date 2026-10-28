@@ -24,7 +24,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { FileHeader } from "@/components/file-header";
 import { FileTree } from "@/components/file-tree";
 import { FolderView, HomeView } from "@/components/folder-view";
-import { NoRootView, reloadHome, RootSwitcher } from "@/components/root-switcher";
+import { MenuFolderPick, NoRootView, reloadHome, RootSwitcher } from "@/components/root-switcher";
 import { SearchDialog, type SearchTarget } from "@/components/search-dialog";
 import { BinaryViewer } from "@/components/viewers/binary-viewer";
 import { CodeViewer } from "@/components/viewers/code-viewer";
@@ -595,6 +595,7 @@ function Shell({ initialConfig }: { initialConfig: AppConfig | null }) {
       hasUnsaved={hasUnsaved}
       editorText={editorText}
     >
+      <MenuFolderPick beforeSwitch={confirmLeave} onLeave={onLeave} />
       <FileTree
         tree={tree}
         root={root}

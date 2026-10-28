@@ -39,7 +39,8 @@ IDLE_CLOSE_S = 60.0
 PAPERS = {"a4", "letter"}
 ORIENTATIONS = {"portrait", "landscape", "auto"}  # auto: landscape for wide diagrams
 # Same values as the @page rule the /print page writes (see web/src/app/print).
-MARGINS = {"top": "18mm", "bottom": "16mm", "left": "16mm", "right": "16mm"}
+MARGINS_MM = {"top": 18, "bottom": 16, "left": 16, "right": 16}
+MARGINS = {k: f"{v}mm" for k, v in MARGINS_MM.items()}
 
 CHROME_ARGS = [
     "--disable-background-networking",
@@ -201,15 +202,30 @@ class PdfJob:
     toc: bool = False
 
 
-def _templates(job: PdfJob) -> tuple[str, str]:
+def print_url(origin: str, job: PdfJob) -> str:
+    q = {"p": job.path, "paper": job.paper, "orientation": job.orientation, "toc": "1" if job.toc else "0"}
+    return f"{origin}/print?{urlencode(q)}"
+
+
+# Chrome fills `<span class="title">` with document.title, which the print page sets to __PDF_TITLE__:
+# lets a renderer send the header before the page has picked its title (desktop bridge).
+TITLE_SPAN = '<span class="title"></span>'
+
+
+def pdf_templates(job: PdfJob, *, title_html: str | None = None) -> tuple[str, str]:
+    """Header/footer templates for printToPDF: title (escaped, or `title_html` as-is) / path + page n of m."""
     style = ("font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif; font-size: 8px; "
              "color: #6b7280; width: 100%; padding: 0 16mm; display: flex; gap: 8px;")
     ell = "overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
-    header = (f'<div style="{style}"><span style="{ell} flex: 1;">{html.escape(job.title)}</span></div>')
+    title = html.escape(job.title) if title_html is None else title_html
+    header = (f'<div style="{style}"><span style="{ell} flex: 1;">{title}</span></div>')
     footer = (f'<div style="{style}"><span style="{ell} flex: 1;">{html.escape(job.display_path)}</span>'
               '<span style="white-space: nowrap;">page <span class="pageNumber"></span> of '
               '<span class="totalPages"></span></span></div>')
     return header, footer
+
+
+_templates = pdf_templates  # backwards-compatible name
 
 
 class PdfRenderer:
@@ -295,8 +311,7 @@ class PdfRenderer:
             pass
 
     def print_url(self, job: PdfJob) -> str:
-        q = {"p": job.path, "paper": job.paper, "orientation": job.orientation, "toc": "1" if job.toc else "0"}
-        return f"{self.origin}/print?{urlencode(q)}"
+        return print_url(self.origin, job)
 
     async def render(self, job: PdfJob) -> tuple[bytes, dict]:
         async with self._lock:
@@ -349,7 +364,7 @@ class PdfRenderer:
             chosen = await page.evaluate("() => window.__PDF_ORIENTATION__ || ''")
             landscape = (chosen or job.orientation) == "landscape"
             errors["orientation"] = "landscape" if landscape else "portrait"
-            header, footer = _templates(PdfJob(**{**job.__dict__, "title": title}))
+            header, footer = pdf_templates(PdfJob(**{**job.__dict__, "title": title}))
             data = await page.pdf(
                 format="A4" if job.paper == "a4" else "Letter", landscape=landscape,
                 print_background=True, prefer_css_page_size=True, margin=MARGINS,

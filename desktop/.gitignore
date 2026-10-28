@@ -1,0 +1,7 @@
+node_modules/
+dist/
+release/
+# build outputs (build/icon.* are sources)
+build/server/
+build/pyenv/
+build/pyinstaller/

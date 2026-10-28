@@ -53,7 +53,9 @@ Picker = Callable[[], Awaitable[str | None]]  # -> chosen folder, or None if can
 
 
 class PickerError(Exception):
-    pass
+    def __init__(self, detail: str, status: int = 500):  # status: what /api/roots/pick answers
+        super().__init__(detail)
+        self.status = status
 
 
 async def _run_dialog(cmd: list[str], cancelled: Callable[[int, str], bool]) -> str | None:
@@ -372,7 +374,7 @@ class RootSwitcher:
             try:
                 chosen = await self.picker()
             except PickerError as e:
-                return j({"detail": str(e)}, 500)
+                return j({"detail": str(e)}, e.status)
             finally:
                 self._picking = False
             if not chosen:
