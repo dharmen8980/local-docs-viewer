@@ -13,7 +13,7 @@
     "typecheck": "tsc -p . --noEmit",
     "lint": "tsc -p . --noEmit",
     "start": "npm run build && electron .",
-    "test": "npm run build && node --test test/",
+    "test": "npm run build && node --test \"test/*.test.js\"",
     "icon": "electron scripts/make-icon.js",
     "build:server": "bash scripts/build-server.sh",
     "dist": "node scripts/dist.mjs",
