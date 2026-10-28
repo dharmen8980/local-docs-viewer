@@ -1,0 +1,408 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@plugin "@tailwindcss/typography";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --font-heading: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  /* Tailwind v4 no longer gives buttons a pointer cursor */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="tab"]:not([aria-disabled="true"]),
+  summary,
+  label[for] {
+    cursor: pointer;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+/* ---------- viewer specific ---------- */
+
+/* shiki dual themes: light colours are inline, dark via CSS variables */
+.dark .shiki,
+.dark .shiki span {
+  color: var(--shiki-dark) !important;
+  background-color: var(--shiki-dark-bg) !important;
+  font-style: var(--shiki-dark-font-style) !important;
+  font-weight: var(--shiki-dark-font-weight) !important;
+  text-decoration: var(--shiki-dark-text-decoration) !important;
+}
+
+.code-block pre.shiki {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  overflow-x: auto;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  border-radius: 0;
+  background: transparent !important;
+}
+.dark .code-block pre.shiki { background: transparent !important; }
+
+/* Line-numbered code view */
+.code-lines .line {
+  display: inline-block;
+  min-width: 100%;
+}
+.code-lines .line::before {
+  content: attr(data-line);
+  display: inline-block;
+  width: var(--gutter, 3.5ch);
+  margin-right: 1.25ch;
+  text-align: right;
+  color: var(--muted-foreground);
+  opacity: 0.6;
+  user-select: none;
+  cursor: pointer;
+}
+.code-lines .line.is-target {
+  background: color-mix(in oklch, var(--color-yellow-300) 35%, transparent);
+}
+.dark .code-lines .line.is-target,
+.dark .code-lines .line.is-target span {
+  background-color: color-mix(in oklch, var(--color-yellow-500) 25%, transparent) !important;
+}
+
+mark.hl {
+  background: color-mix(in oklch, var(--color-yellow-300) 75%, transparent);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.dark mark.hl {
+  background: color-mix(in oklch, var(--color-yellow-500) 45%, transparent);
+}
+mark.hl.hl-active {
+  outline: 2px solid var(--color-orange-500);
+}
+
+.mermaid-diagram svg {
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.markdown-body :is(h1, h2, h3, h4, h5, h6) { scroll-margin-top: 4.5rem; }
+.markdown-body .heading-anchor {
+  opacity: 0;
+  margin-left: 0.4rem;
+  text-decoration: none;
+  color: var(--muted-foreground);
+}
+.markdown-body :is(h1, h2, h3, h4, h5, h6):hover .heading-anchor { opacity: 1; }
+.markdown-body :target { scroll-margin-top: 4.5rem; }
+
+/* zoomable diagrams (components/zoomable-svg.tsx): the sizer keeps the box at the size the
+   plain SVG had; the content is the SVG at its natural size, scaled by a transform */
+@media screen {
+  .mermaid-zoom-layer {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    border-radius: inherit;
+  }
+  .mermaid-zoom-content {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: var(--zw);
+    height: var(--zh);
+    transform-origin: 0 0;
+  }
+  .mermaid-zoom-content svg {
+    display: block;
+    width: 100% !important;
+    height: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+  }
+}
+.mermaid-zoom-sizer { margin: 0 auto; }
+
+/* dark mode keeps a light-theme copy of each mermaid diagram for printing */
+.mermaid-print { display: none; }
+
+@media print {
+  /* browser printing of a zoomable diagram: the plain, untransformed SVG */
+  .mermaid-zoom { overflow: visible !important; min-height: 0 !important; max-height: none !important; }
+  .mermaid-zoom-sizer { display: none !important; }
+  .mermaid-zoom-content { transform: none !important; visibility: visible !important; }
+  .mermaid-screen { display: none !important; }
+  .mermaid-print { display: block !important; }
+  html, body { background: #fff !important; color: #000 !important; }
+  .no-print, [data-slot="sidebar"], [data-slot="sidebar-gap"], [data-slot="sidebar-container"] { display: none !important; }
+  [data-slot="sidebar-wrapper"] { display: block !important; }
+  [data-slot="sidebar-inset"] { margin: 0 !important; box-shadow: none !important; }
+  .print-area { overflow: visible !important; height: auto !important; max-width: none !important; }
+  .markdown-body { color: #000 !important; }
+  .markdown-body a { color: #000 !important; }
+  .markdown-body pre, .code-block { break-inside: avoid; }
+  .mermaid-diagram { break-inside: avoid; }
+  .shiki, .shiki span { color: var(--shiki-light, inherit) !important; background: transparent !important; }
+}
+
+@media print {
+  .dark {
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.145 0 0);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.45 0 0);
+    --border: oklch(0.85 0 0);
+  }
+  .dark .shiki, .dark .shiki span { color: var(--shiki-light, inherit) !important; background: transparent !important; }
+  .dark .prose { --tw-prose-body: #111; --tw-prose-headings: #000; --tw-prose-links: #000; --tw-prose-bold: #000; --tw-prose-code: #000; --tw-prose-th-borders: #999; --tw-prose-td-borders: #ccc; }
+}
+
+::highlight(search-hl) {
+  background-color: color-mix(in oklch, var(--color-yellow-300) 80%, transparent);
+  color: inherit;
+}
+.dark ::highlight(search-hl) {
+  background-color: color-mix(in oklch, var(--color-yellow-500) 55%, transparent);
+}
+
+/* ---------- PDF print layout (/print, rendered by headless Chrome for /api/pdf) ---------- */
+/* @page size/margins and --pdf-content-w/-h are written by the page from its query. */
+html:has(.pdf-doc),
+html:has(.pdf-doc) body {
+  background: #fff !important;
+  color: #111 !important;
+  min-height: 0;
+  height: auto;
+}
+.pdf-doc {
+  --pdf-figure-max-h: calc(var(--pdf-content-h, 260mm) - 22mm);
+  max-width: var(--pdf-content-w, 180mm);
+  margin: 0 auto;
+  color: #111;
+  font-size: 10.5pt;
+  line-height: 1.55;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.pdf-cover {
+  border-bottom: 1px solid #d4d4d4;
+  padding-bottom: 5mm;
+  margin-bottom: 7mm;
+  break-inside: avoid;
+}
+.pdf-cover .pdf-title {
+  font-size: 22pt;
+  font-weight: 700;
+  line-height: 1.2;
+  margin: 0 0 3mm;
+  color: #000;
+}
+.pdf-cover dl { display: grid; gap: 0.8mm; margin: 0; font-size: 8.5pt; color: #525252; }
+.pdf-cover dl > div { display: flex; gap: 3mm; }
+.pdf-cover dt { font-weight: 600; min-width: 16mm; }
+.pdf-cover dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.pdf-cover code { font-family: var(--font-mono); font-size: 8pt; }
+/* standalone diagrams: a small cover leaves the page to the diagram */
+.pdf-cover-compact { padding-bottom: 2.5mm; margin-bottom: 4mm; }
+.pdf-cover-compact .pdf-title { font-size: 13pt; margin-bottom: 1.5mm; }
+.pdf-cover-compact dl { display: flex; flex-wrap: wrap; column-gap: 6mm; font-size: 7.5pt; }
+.pdf-cover-compact dt { min-width: 0; }
+.pdf-toc { break-after: page; }
+.pdf-toc h2 { font-size: 13pt; font-weight: 700; margin: 0 0 3mm; }
+.pdf-toc ol { list-style: none; margin: 0; padding: 0; font-size: 9.5pt; }
+.pdf-toc li { margin: 0.6mm 0; break-inside: avoid; }
+.pdf-toc .pdf-toc-l0 { font-weight: 600; }
+.pdf-toc .pdf-toc-l1 { padding-left: 5mm; }
+.pdf-toc .pdf-toc-l2 { padding-left: 10mm; color: #404040; }
+.pdf-doc .pdf-toc a { text-decoration: none; }
+.pdf-fatal { padding: 10mm 0; }
+.pdf-fatal h1 { font-size: 16pt; font-weight: 700; }
+
+.pdf-doc .pdf-article { font-size: 10.5pt; }
+.pdf-hide-first-h1 > h1:first-child { display: none; }
+
+/* pagination: never split figures, keep headings with what follows */
+.pdf-doc :is(h1, h2, h3, h4, h5, h6) { break-after: avoid; break-inside: avoid; }
+.pdf-doc :is(p, li, dd, blockquote p) { orphans: 3; widows: 3; }
+.pdf-doc :is(img, figure, .mermaid-figure, .mermaid-diagram, .mermaid-error, blockquote, tr, .md-image-missing) {
+  break-inside: avoid;
+}
+.pdf-doc .code-block { break-inside: avoid; overflow: visible; }
+.pdf-doc .code-block.code-long,
+.pdf-doc .code-block.code-long pre { break-inside: auto; }
+.pdf-doc pre,
+.pdf-doc pre code {
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere;
+  overflow: visible !important;
+}
+/* Wide code (ASCII diagrams, tables) shrinks to fit the line width, down to 5.5pt; only
+   lines that still do not fit wrap. Monospace advance is about 0.6em. */
+.pdf-doc .code-block pre.shiki {
+  font-size: clamp(5.5pt, calc((var(--pdf-content-w, 178mm) - 9mm) / (var(--code-cols, 80) * 0.61)), 8pt);
+  line-height: 1.5;
+  padding: 2.5mm 3.5mm;
+}
+/* one line never splits across pages (shiki wraps each line in .line) */
+.pdf-doc pre .line { display: inline-block; width: 100%; break-inside: avoid; }
+.pdf-doc .mermaid-error pre { font-size: 7.5pt; }
+
+/* figures are scaled into the printable page box, keeping their aspect ratio */
+.pdf-doc img {
+  max-width: 100% !important;
+  max-height: var(--pdf-figure-max-h);
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+.pdf-doc .mermaid-figure { min-height: 0; margin: 4mm 0; }
+.pdf-doc .mermaid-diagram {
+  overflow: visible !important;
+  padding: 3mm;
+  background: #fff !important;
+  border-color: #e5e5e5;
+}
+.pdf-doc .mermaid-diagram svg {
+  display: block;
+  max-width: 100% !important;
+  max-height: var(--pdf-figure-max-h);
+  height: auto;
+  margin: 0 auto;
+}
+.pdf-doc .pdf-mermaid-file .mermaid-diagram { border: 0; padding: 0; }
+.pdf-doc .pdf-mermaid-file .mermaid-figure { margin: 0; }
+.pdf-doc .pdf-mermaid-file .mermaid-diagram svg {
+  max-height: calc(var(--pdf-content-h, 260mm) - var(--pdf-cover-h, 40mm) - 4mm);
+}
+
+/* tables: shrink/wrap to the page width, repeat the header row */
+.pdf-doc div:has(> table) { overflow: visible !important; }
+.pdf-doc .markdown-body table { width: 100%; table-layout: auto; font-size: 8.5pt; }
+/* break-word (not anywhere) so a column is never narrower than its longest word */
+.pdf-doc .markdown-body :is(th, td) { overflow-wrap: break-word; hyphens: auto; padding: 1.2mm 2mm; vertical-align: top; }
+.pdf-doc .markdown-body thead { display: table-header-group; }
+
+/* links read as text; in-repo links show their target path */
+.pdf-doc a { color: inherit !important; text-decoration: underline; text-decoration-color: #a3a3a3; }
+.pdf-doc .pdf-link-target { color: #737373; font-size: 0.82em; overflow-wrap: anywhere; }
+/* inline code (long paths, identifiers) may break anywhere, also inside table cells */
+.pdf-doc :not(pre) > code { overflow-wrap: anywhere; }

@@ -1,0 +1,17 @@
+# recovery store: history, trash, audit log, remembered folders (contains your docs)
+.data/
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.ruff_cache/
+.pytest_cache/
+
+# local uv cache (UV_CACHE_DIR=$PWD/.cache/uv)
+.cache/
+
+# misc
+.DS_Store
+.env
+.env.*
