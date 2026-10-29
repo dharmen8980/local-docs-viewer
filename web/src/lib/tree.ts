@@ -1,4 +1,4 @@
-import type { FileEntry, TreeResponse } from "@/lib/api";
+import type { FileEntry, FileKind, TreeResponse } from "@/lib/api";
 import { basename, dirname } from "@/lib/paths";
 
 export interface DirNode {
@@ -66,4 +66,23 @@ export function findDir(root: DirNode, path: string): DirNode | null {
     node = node.dirs.find((d) => d.path === p);
   }
   return node ?? null;
+}
+
+/** The tree with only files of the given kinds; folders left without files are dropped. Empty set: no filter. */
+export function filterKinds(root: DirNode, kinds: ReadonlySet<FileKind>): DirNode {
+  if (!kinds.size) return root;
+  const walk = (n: DirNode): DirNode | null => {
+    const files = n.files.filter((f) => kinds.has(f.kind));
+    const dirs = n.dirs.map(walk).filter((d): d is DirNode => d !== null);
+    if (n.path && !files.length && !dirs.length) return null;
+    let mtime = 0;
+    let fileCount = files.length;
+    for (const f of files) mtime = Math.max(mtime, f.mtime);
+    for (const d of dirs) {
+      mtime = Math.max(mtime, d.mtime);
+      fileCount += d.fileCount;
+    }
+    return { ...n, files, dirs, mtime, fileCount };
+  };
+  return walk(root) ?? root;
 }

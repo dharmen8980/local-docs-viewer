@@ -3,6 +3,7 @@
 import { memo, useEffect, useMemo, useRef, type ReactNode } from "react";
 import {
   ArrowDownAZIcon,
+  ArrowUpDownIcon,
   CalendarClockIcon,
   ChevronRightIcon,
   ClockIcon,
@@ -13,6 +14,7 @@ import {
   FolderInputIcon,
   FolderOpenIcon,
   FolderPlusIcon,
+  FunnelIcon,
   HistoryIcon,
   PencilLineIcon,
   Trash2Icon,
@@ -27,6 +29,18 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { DRAG_MIME, hasDrag, readDrag, useEditOps, type EditOps } from "@/components/edit/edit-context";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
@@ -45,12 +59,11 @@ import {
   SidebarMenuSub,
   SidebarRail,
 } from "@/components/ui/sidebar";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FileKindIcon } from "@/components/file-icon";
-import { formatRelative, type FileEntry, type TreeResponse } from "@/lib/api";
+import { formatRelative, type FileEntry, type FileKind, type TreeResponse } from "@/lib/api";
 import { dirname, viewerHref } from "@/lib/paths";
-import { sortDirs, sortFiles, type DirNode, type SortMode } from "@/lib/tree";
+import { filterKinds, sortDirs, sortFiles, type DirNode, type SortMode } from "@/lib/tree";
 import { cn } from "@/lib/utils";
 
 interface TreeCtx {
@@ -64,6 +77,22 @@ interface TreeCtx {
 }
 
 const DROP_CLASS = "data-[drop=true]:bg-primary/15 data-[drop=true]:ring-1 data-[drop=true]:ring-primary";
+/** Menu order and labels for the file type filter. */
+const KIND_LABELS: [FileKind, string][] = [
+  ["markdown", "Markdown"],
+  ["mermaid", "Mermaid"],
+  ["image", "Images"],
+  ["pdf", "PDF"],
+  ["json", "JSON"],
+  ["csv", "CSV"],
+  ["xlsx", "Spreadsheets"],
+  ["code", "Code"],
+  ["text", "Text"],
+  ["binary", "Other"],
+];
+
+const ACTIVE_CLASS =
+  "data-active:bg-neutral-300 data-active:hover:bg-neutral-300 dark:data-active:bg-neutral-600 dark:data-active:hover:bg-neutral-600";
 
 function FileMenu({ ops, path, children }: { ops: EditOps; path: string; children: ReactNode }) {
   const dir = dirname(path);
@@ -172,7 +201,7 @@ function FileLink({
       size="sm"
       isActive={active}
       data-path={file.path}
-      className={cn("h-auto min-h-7 py-1", ops && DROP_CLASS)}
+      className={cn("h-auto min-h-7 py-1", ACTIVE_CLASS, ops && DROP_CLASS)}
     >
       <a
         href={viewerHref(file.path)}
@@ -276,6 +305,9 @@ export interface FileTreeProps {
   rootSwitcher?: ReactNode;
   sort: SortMode;
   onSortChange: (s: SortMode) => void;
+  /** file kinds to show; empty shows everything */
+  kinds: FileKind[];
+  onKindsChange: (k: FileKind[]) => void;
   filter: string;
   onFilterChange: (s: string) => void;
   expanded: Set<string>;
@@ -285,7 +317,14 @@ export interface FileTreeProps {
 }
 
 export function FileTree(props: FileTreeProps) {
-  const { tree, root, loading, error, sort, filter, expanded, activePath, onToggle, onOpen } = props;
+  const { tree, loading, error, sort, filter, kinds, expanded, activePath, onToggle, onOpen } = props;
+  const kindSet = useMemo(() => new Set(kinds), [kinds]);
+  const root = useMemo(() => (props.root ? filterKinds(props.root, kindSet) : null), [props.root, kindSet]);
+  const kindCounts = useMemo(() => {
+    const m = new Map<FileKind, number>();
+    for (const f of tree?.files ?? []) m.set(f.kind, (m.get(f.kind) ?? 0) + 1);
+    return m;
+  }, [tree]);
   const contentRef = useRef<HTMLDivElement>(null);
   const ops = useEditOps();
   const dropEl = useRef<HTMLElement | null>(null);
@@ -363,8 +402,14 @@ export function FileTree(props: FileTreeProps) {
     : {};
 
   const recent = useMemo(
-    () => (tree ? [...tree.files].sort((a, b) => b.mtime - a.mtime).slice(0, 10) : []),
-    [tree],
+    () =>
+      tree
+        ? tree.files
+            .filter((f) => !kindSet.size || kindSet.has(f.kind))
+            .sort((a, b) => b.mtime - a.mtime)
+            .slice(0, 10)
+        : [],
+    [tree, kindSet],
   );
 
   const filtered = useMemo(() => {
@@ -372,6 +417,7 @@ export function FileTree(props: FileTreeProps) {
     if (!tree || !terms.length) return null;
     return tree.files
       .filter((f) => {
+        if (kindSet.size && !kindSet.has(f.kind)) return false;
         const p = f.path.toLowerCase();
         return terms.every((t) => p.includes(t));
       })
@@ -381,7 +427,7 @@ export function FileTree(props: FileTreeProps) {
         return an - bn || a.path.localeCompare(b.path);
       })
       .slice(0, 300);
-  }, [tree, filter]);
+  }, [tree, filter, kindSet]);
 
   // Keep the open file visible in the tree.
   useEffect(() => {
@@ -411,30 +457,76 @@ export function FileTree(props: FileTreeProps) {
             {props.rootName || "viewer"}
           </a>
           {props.rootSwitcher}
-          <ToggleGroup
-            type="single"
-            size="sm"
-            variant="outline"
-            value={sort}
-            onValueChange={(v) => v && props.onSortChange(v as SortMode)}
-          >
+          <DropdownMenu>
             <Tooltip>
               <TooltipTrigger asChild>
-                <ToggleGroupItem value="name" aria-label="Sort by name">
-                  <ArrowDownAZIcon />
-                </ToggleGroupItem>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon-sm" aria-label="Sort">
+                    {sort === "mtime" ? <CalendarClockIcon /> : <ArrowDownAZIcon />}
+                  </Button>
+                </DropdownMenuTrigger>
               </TooltipTrigger>
-              <TooltipContent>Sort by name</TooltipContent>
+              <TooltipContent>Sort: {sort === "mtime" ? "modified time" : "name"}</TooltipContent>
             </Tooltip>
+            <DropdownMenuContent align="end" className="min-w-44">
+              <DropdownMenuLabel className="flex items-center gap-1.5">
+                <ArrowUpDownIcon className="size-3.5" /> Sort by
+              </DropdownMenuLabel>
+              <DropdownMenuRadioGroup value={sort} onValueChange={(v) => props.onSortChange(v as SortMode)}>
+                <DropdownMenuRadioItem value="name">
+                  <ArrowDownAZIcon /> Name
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="mtime">
+                  <CalendarClockIcon /> Modified time
+                </DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <DropdownMenu>
             <Tooltip>
               <TooltipTrigger asChild>
-                <ToggleGroupItem value="mtime" aria-label="Sort by modified time">
-                  <CalendarClockIcon />
-                </ToggleGroupItem>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant={kinds.length ? "secondary" : "ghost"}
+                    size="icon-sm"
+                    aria-label="Filter by file type"
+                    className="relative"
+                  >
+                    <FunnelIcon />
+                    {kinds.length ? (
+                      <span className="absolute -top-0.5 -right-0.5 flex size-3.5 items-center justify-center rounded-full bg-primary text-[9px] text-primary-foreground">
+                        {kinds.length}
+                      </span>
+                    ) : null}
+                  </Button>
+                </DropdownMenuTrigger>
               </TooltipTrigger>
-              <TooltipContent>Sort by modified time</TooltipContent>
+              <TooltipContent>
+                {kinds.length ? `Showing ${kinds.length} file type${kinds.length === 1 ? "" : "s"}` : "Filter by file type"}
+              </TooltipContent>
             </Tooltip>
-          </ToggleGroup>
+            <DropdownMenuContent align="end" className="min-w-48">
+              <DropdownMenuLabel>File types</DropdownMenuLabel>
+              {KIND_LABELS.filter(([k]) => kindCounts.has(k) || kindSet.has(k)).map(([k, label]) => (
+                <DropdownMenuCheckboxItem
+                  key={k}
+                  checked={kindSet.has(k)}
+                  onSelect={(e) => e.preventDefault()}
+                  onCheckedChange={(on) =>
+                    props.onKindsChange(on ? [...kinds, k] : kinds.filter((x) => x !== k))
+                  }
+                >
+                  <FileKindIcon kind={k} className="text-muted-foreground" />
+                  <span className="flex-1">{label}</span>
+                  <span className="text-xs text-muted-foreground">{kindCounts.get(k) ?? 0}</span>
+                </DropdownMenuCheckboxItem>
+              ))}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem disabled={!kinds.length} onSelect={() => props.onKindsChange([])}>
+                <XIcon /> Show all types
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
         <div className="relative">
           <SidebarInput

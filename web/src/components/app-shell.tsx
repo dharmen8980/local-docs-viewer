@@ -168,6 +168,7 @@ function Shell({ initialConfig }: { initialConfig: AppConfig | null }) {
   const { setOpen, setOpenMobile, isMobile } = useSidebar();
   const [config, setConfig] = useState<AppConfig | null>(initialConfig);
   const [sort, setSort] = useState<SortMode>("name");
+  const [kinds, setKinds] = useState<FileKind[]>([]);
   const [filter, setFilter] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [searchOpen, setSearchOpen] = useState(false);
@@ -241,6 +242,16 @@ function Shell({ initialConfig }: { initialConfig: AppConfig | null }) {
     const saved = window.localStorage.getItem("viewer.sort");
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (saved === "name" || saved === "mtime") setSort(saved);
+    try {
+      const k: unknown = JSON.parse(window.localStorage.getItem("viewer.kinds") ?? "[]");
+      if (Array.isArray(k)) setKinds(k.filter((x): x is FileKind => typeof x === "string"));
+    } catch {
+      // ignore a corrupt saved value
+    }
+  }, []);
+  const changeKinds = useCallback((k: FileKind[]) => {
+    setKinds(k);
+    window.localStorage.setItem("viewer.kinds", JSON.stringify(k));
   }, []);
   const changeSort = useCallback((s: SortMode) => {
     setSort(s);
@@ -610,6 +621,8 @@ function Shell({ initialConfig }: { initialConfig: AppConfig | null }) {
         }
         sort={sort}
         onSortChange={changeSort}
+        kinds={kinds}
+        onKindsChange={changeKinds}
         filter={filter}
         onFilterChange={setFilter}
         expanded={expanded}
