@@ -47,7 +47,7 @@ import { editorLangFor } from "@/lib/editor-lang";
 import { dirname } from "@/lib/paths";
 import { cn } from "@/lib/utils";
 import type { CodeEditorHandle } from "./code-editor";
-import { DiffView } from "./diff-view";
+import { DiffView } from "@/components/diff/diff-view";
 
 const CodeEditor = lazy(() => import("./code-editor"));
 
@@ -141,8 +141,8 @@ export interface EditorPaneProps {
   /** Leave edit mode (the caller prompts when there are unsaved changes). */
   onExit: () => void;
   onOpenHistory: (path: string) => void;
-  /** a file was saved (for the caller's own bookkeeping) */
-  onSaved?: (path: string) => void;
+  /** a file was saved (for the caller's own bookkeeping): what is on disk now */
+  onSaved?: (path: string, saved: { mtime: number; size: number; text: string }) => void;
   handleRef?: Ref<EditorPaneHandle>;
 }
 
@@ -399,7 +399,7 @@ export function EditorPane({ path, file, onDirtyChange, onExit, onOpenHistory, o
         missingRef.current = false;
         setConflict(null);
         markClean(doc);
-        onSaved?.(target);
+        onSaved?.(target, { mtime: r.mtime, size: r.size, text: content });
         const historyId = r.history_id;
         toast.success("Saved", {
           description: target,

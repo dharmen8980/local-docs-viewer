@@ -22,6 +22,7 @@ from . import __version__
 from .config import Settings
 from .edit import Editor
 from .edit_routes import DEV_UI_PORT, MAX_UPLOAD_FILES, EditGate, is_edit_path, register_edit_routes
+from .git import GitLink, register_git_routes
 from .paths import INLINE_MIME, PathError, PathGuard, ext_of, kind_of, mime_of
 from .pdf import ORIENTATIONS, PAPERS, PdfError, PdfJob, PdfRenderer
 from .readers import CONTENT_MAX, read_csv, read_xlsx, text_chunks
@@ -38,10 +39,20 @@ PDF_CSP = "default-src 'none'; object-src 'self'; style-src 'unsafe-inline'; bas
 ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
 ALLOWED_METHODS = {"GET", "HEAD"}
 ROOTS_PREFIX = "/api/roots"  # folder switching; served by the outer RootSwitcher (roots.py), RootGate-guarded
+SEEN_PREFIX = "/api/seen"  # "changed since you last looked" history (seen.py); same outer app and gate
 
 
 def is_roots_path(path: str) -> bool:
     return path == ROOTS_PREFIX or path.startswith(ROOTS_PREFIX + "/")
+
+
+def is_seen_path(path: str) -> bool:
+    return path == SEEN_PREFIX or path.startswith(SEEN_PREFIX + "/")
+
+
+def is_gated_path(path: str) -> bool:
+    """Paths the outer RootSwitcher serves itself, behind RootGate."""
+    return is_roots_path(path) or is_seen_path(path)
 
 
 def _host_only(value: str) -> str:
@@ -69,7 +80,8 @@ def _forwarded_hosts_ok(scope) -> bool:
 
 class SecurityMiddleware:
     """Pure ASGI: refuse non-GET/HEAD (except below /api/edit, which EditGate guards, and, with
-    roots=True, below /api/roots, which RootGate guards), add security headers to every response."""
+    roots=True, below /api/roots and /api/seen, which RootGate guards), add security headers to
+    every response."""
 
     def __init__(self, app, *, roots: bool = False):
         self.app = app
@@ -79,7 +91,7 @@ class SecurityMiddleware:
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
         if (scope["method"] not in ALLOWED_METHODS and not is_edit_path(scope["path"])
-                and not (self.roots and is_roots_path(scope["path"]))):
+                and not (self.roots and is_gated_path(scope["path"]))):
             body = b'{"detail":"Method Not Allowed"}'
             await send({"type": "http.response.start", "status": 405, "headers": [
                 (b"content-type", b"application/json"), (b"content-length", str(len(body)).encode()),
@@ -193,6 +205,7 @@ def create_app(settings: Settings) -> FastAPI:
     editor = Editor(settings, guard, store) if settings.allow_edit else None
     index = SearchIndex(store, settings.search_max_bytes)
     repo_prefix = find_repo_prefix(settings.root)
+    git = GitLink(settings, guard)  # detected on first use (off: not a repo, no git, --git off)
     pdf = make_pdf_renderer(settings)
     closing = asyncio.Event()  # set on lifespan shutdown: ends this app's SSE streams (root switch)
 
@@ -235,6 +248,7 @@ def create_app(settings: Settings) -> FastAPI:
     app.state.pdf = pdf
     app.state.editor = editor
     app.state.closing = closing
+    app.state.git = git
     app.state.config_extra = None  # RootSwitcher: request -> {"root_switch_enabled", "root_token"?}
 
     def get(path: str):
@@ -248,7 +262,7 @@ def create_app(settings: Settings) -> FastAPI:
                "ignore_patterns": list(settings.ignore), "upload_ext": list(settings.upload_ext),
                "upload_max_bytes": settings.upload_max_bytes, "edit_max_bytes": settings.edit_max_bytes,
                "upload_max_files": MAX_UPLOAD_FILES, "root_path": settings.root, "no_root": False,
-               "root_switch_enabled": False}
+               "root_switch_enabled": False, "git_enabled": git.repo() is not None}
         if editor is not None and _same_site_request(request):
             out["edit_token"] = editor.token
         if app.state.config_extra is not None:
@@ -366,7 +380,8 @@ def create_app(settings: Settings) -> FastAPI:
                         data = await q.get()
                     if data is None:
                         continue
-                    yield {"event": "change", "data": json.dumps(data)}
+                    event, data = data if isinstance(data, tuple) else ("change", data)
+                    yield {"event": event, "data": json.dumps(data)}
             finally:
                 store.unsubscribe(q)
 
@@ -420,6 +435,8 @@ def create_app(settings: Settings) -> FastAPI:
 
     if editor is not None:
         register_edit_routes(app, editor, on_change)
+
+    register_git_routes(app, git.repo, _same_site_request)
 
     @get("/api/{rest:path}")
     def api_not_found(rest: str):

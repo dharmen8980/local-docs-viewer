@@ -25,6 +25,7 @@ it still exists) and otherwise starts with no folder selected.
 | Versions kept per file | `--history-keep N` | none | `50` |
 | Upload size limit per file | `--upload-max-mb N` | none | `25` |
 | Upload extensions | `--upload-ext EXT` (repeatable or comma-separated; replaces the list) | none | `png jpg jpeg gif webp svg pdf md mmd txt csv json yaml yml py sh log` |
+| Git views | `--git PATH\|off` | `DOCS_VIEWER_GIT` | found on `PATH`, then `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, `/bin` (never the macOS stub); `off` turns them off; see [Git](git.md#which-git) |
 | Desktop mode (set by the desktop app) | `--desktop` | `DOCS_VIEWER_DESKTOP=1` | off; see [Desktop app](desktop.md) |
 
 Deny and ignore patterns are case-insensitive `fnmatch` globs. Names and
@@ -72,7 +73,10 @@ that no longer exist are dropped from the list. In read-only mode nothing is
 written if the data dir lies inside the folder being viewed.
 
 `--lock-root` (or `DOCS_VIEWER_LOCK_ROOT=1`) pins the folder given at startup:
-the menu is hidden and every `POST /api/roots/*` returns 403.
+the menu is hidden and every `POST /api/roots/*` returns 403. The changes
+history (`/api/seen/*`, see [Security model](security.md#the-apiseen-endpoints))
+keeps working, writes and **Clear history…** included: it lives in the data dir
+and never changes which folder is shown or anything inside it.
 
 ### The /api/roots endpoints and their security model
 

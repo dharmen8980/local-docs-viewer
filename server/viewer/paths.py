@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import fnmatch
 import mimetypes
 import os
 import posixpath
 import stat as stat_mod
+import threading
 import unicodedata
 from dataclasses import dataclass
 
@@ -106,6 +108,28 @@ class PathGuard:
             cdd = canonical_path(dd)
             self.excluded = (cdd,)
             self._excluded_fold = (fold(cdd),)
+        self._listings = threading.local()  # see cached_listings
+
+    @contextlib.contextmanager
+    def cached_listings(self):
+        """Within the block (this thread only), disk_names lists each directory once. For batches
+        such as git status, which resolve thousands of paths that share directories."""
+        prev = getattr(self._listings, "dirs", None)
+        if prev is None:
+            self._listings.dirs = {}
+        try:
+            yield
+        finally:
+            self._listings.dirs = prev
+
+    def _listdir(self, path: str) -> list[str]:
+        cache = getattr(self._listings, "dirs", None)
+        if cache is None:
+            return os.listdir(path)
+        entries = cache.get(path)
+        if entries is None:
+            entries = cache[path] = os.listdir(path)
+        return entries
 
     @staticmethod
     def _is_within(child: str, parent: str) -> bool:
@@ -172,7 +196,7 @@ class PathGuard:
             if not c or c == ".":
                 continue
             try:
-                entries = os.listdir(cur)
+                entries = self._listdir(cur)
             except OSError:
                 return None
             if c in entries:

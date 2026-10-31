@@ -197,6 +197,61 @@ mark.hl.hl-active {
   outline: 2px solid var(--color-orange-500);
 }
 
+/* "Changed since you last viewed it": top-level markdown blocks (see lib/rehype-change-marks.ts). */
+.markdown-body > [data-change] {
+  position: relative;
+  border-radius: 0.25rem;
+  background: color-mix(in oklch, var(--change) 8%, transparent);
+  box-shadow: 0 0 0 0.375rem color-mix(in oklch, var(--change) 8%, transparent);
+}
+.markdown-body > [data-change="modified"] { --change: var(--color-amber-500); }
+.markdown-body > [data-change="added"] { --change: var(--color-emerald-500); }
+.dark .markdown-body > [data-change] {
+  background: color-mix(in oklch, var(--change) 12%, transparent);
+  box-shadow: 0 0 0 0.375rem color-mix(in oklch, var(--change) 12%, transparent);
+}
+.markdown-body > [data-change]::before {
+  content: "";
+  position: absolute;
+  top: -0.375rem;
+  bottom: -0.375rem;
+  left: -0.875rem;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--change);
+}
+/* Removed blocks: a zero-height marker element (its own element, so no overflow of the
+   next block clips it) with a labelled dashed line in the gap above the next block. */
+.markdown-body > .md-removed,
+.markdown-body > .md-removed-end { position: relative; height: 0; margin: 0; scroll-margin-top: 6rem; }
+.markdown-body > .md-removed-end { margin-top: 2.25rem; }
+.markdown-body > .md-removed:first-child { margin-top: 1.25rem; }
+.markdown-body > .md-removed::after,
+.markdown-body > .md-removed-end::after {
+  content: attr(data-removed-label);
+  position: absolute;
+  left: -0.875rem;
+  right: 0;
+  bottom: 0.2rem;
+  padding-bottom: 1px;
+  border-bottom: 2px dashed color-mix(in oklch, var(--color-red-500) 60%, transparent);
+  font-size: 10px;
+  line-height: 1;
+  color: var(--color-red-600);
+  text-indent: 0.875rem;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.dark .markdown-body > .md-removed::after,
+.dark .markdown-body > .md-removed-end::after { color: var(--color-red-400); }
+.markdown-body > [data-change] { scroll-margin-top: 6rem; }
+@media print {
+  .markdown-body > [data-change] { background: none !important; box-shadow: none !important; }
+  .markdown-body > [data-change]::before,
+  .markdown-body > .md-removed,
+  .markdown-body > .md-removed-end { display: none !important; }
+}
+
 .mermaid-diagram svg {
   max-width: 100%;
   height: auto;

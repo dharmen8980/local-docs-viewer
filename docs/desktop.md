@@ -31,8 +31,9 @@ Help → **Show Logs** / **Open Data Folder**.
 Linux `~/.config/Local Docs Viewer`.
 
 - `<userData>/data`: the server's data dir (`state.json` with recent folders
-  and the last folder; per-folder history, trash and audit log when editing
-  is on; see [Recovery data](editing.md#recovery-data-the-data-dir)).
+  and the last folder; `seen.sqlite3`, the [changes history](changes.md);
+  per-folder history, trash and audit log when editing is on; see
+  [Recovery data](editing.md#recovery-data-the-data-dir)).
 - `<userData>/logs/server.log`: server output (rotated at 5 MB).
 - `<userData>/settings.json`: Allow editing and the last viewer port (reused so
   the window's origin, and the UI's saved preferences, stay the same);

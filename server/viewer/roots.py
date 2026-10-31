@@ -28,7 +28,9 @@ from .app import (
     SecurityMiddleware,
     _same_site_request,
     create_app,
+    is_gated_path,
     is_roots_path,
+    is_seen_path,
     mount_ui,
 )
 from .config import (
@@ -41,6 +43,7 @@ from .config import (
     save_state,
 )
 from .edit_routes import DEV_UI_PORT, MAX_UPLOAD_FILES, _send_json
+from .seen import SEEN_JSON_MAX, SeenDB, register_seen_routes, seen_disabled_reason
 
 log = logging.getLogger("viewer")
 
@@ -138,9 +141,10 @@ class _Inner:
 
 
 class RootGate:
-    """Guards mutating /api/roots/* requests like EditGate: X-Root-Token, Sec-Fetch-Site
-    same-origin (if sent), loopback viewer/dev Origin (if sent), application/json, small body.
-    --lock-root -> 403. GET/HEAD pass (the routes only exist for GET /api/roots)."""
+    """Guards mutating /api/roots/* and /api/seen/* requests like EditGate: X-Root-Token,
+    Sec-Fetch-Site same-origin (if sent), loopback viewer/dev Origin (if sent), application/json,
+    bounded body. --lock-root -> 403 below /api/roots only (the changes history still works).
+    GET/HEAD pass (read-only routes)."""
 
     def __init__(self, app, *, token: str, origins: set[str], locked: bool):
         self.app = app
@@ -154,7 +158,7 @@ class RootGate:
             return None
         if method != "POST":
             return 405, "Method Not Allowed"
-        if self.locked:
+        if self.locked and is_roots_path(scope["path"]):
             return 403, "folder switching disabled (--lock-root)"
         headers: dict[bytes, list[bytes]] = {}
         for k, v in scope.get("headers", []):
@@ -163,17 +167,17 @@ class RootGate:
         if len(tok) != 1 or not hmac.compare_digest(tok[0], self.token):
             return 403, "missing or invalid root token"
         if any(v.strip().lower() != b"same-origin" for v in headers.get(b"sec-fetch-site", [])):
-            return 403, "cross-site folder requests are refused"
+            return 403, "cross-site requests are refused"
         for o in headers.get(b"origin", []):
             if o.decode("latin-1").strip().lower() not in self.origins:
-                return 403, "folder requests from this origin are refused"
+                return 403, "requests from this origin are refused"
         ct = b";".join(headers.get(b"content-type", [])).split(b";", 1)[0].strip().lower()
         if ct != b"application/json":
             return 403, "content-type must be application/json"
         return None
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or not is_roots_path(scope["path"]):
+        if scope["type"] != "http" or not is_gated_path(scope["path"]):
             return await self.app(scope, receive, send)
         refusal = self._refusal(scope)
         if refusal is not None:
@@ -181,15 +185,26 @@ class RootGate:
             return await _send_json(send, refusal[0], {"detail": refusal[1]}, extra)
         if scope["method"] != "POST":
             return await self.app(scope, receive, send)
-        body, more = b"", True  # buffer the (tiny) body under a hard limit, then replay it
+        limit = SEEN_JSON_MAX if is_seen_path(scope["path"]) else ROOTS_JSON_MAX
+        for k, v in scope.get("headers", []):
+            if k.lower() == b"content-length":
+                try:
+                    if int(v) > limit:
+                        return await _send_json(send, 413, {"detail": "request body too large"})
+                except ValueError:
+                    return await _send_json(send, 400, {"detail": "invalid content-length"})
+        chunks, size, more = [], 0, True  # buffer the body under a hard limit, then replay it
         while more:
             msg = await receive()
             if msg["type"] == "http.disconnect":
                 return
-            body += msg.get("body", b"")
-            if len(body) > ROOTS_JSON_MAX:
+            chunk = msg.get("body", b"")
+            size += len(chunk)
+            if size > limit:
                 return await _send_json(send, 413, {"detail": "request body too large"})
+            chunks.append(chunk)
             more = msg.get("more_body", False)
+        body = b"".join(chunks)
         replayed = False
 
         async def replay():
@@ -211,8 +226,8 @@ class PathBody(_Body):
 
 
 class RootSwitcher:
-    """Outer ASGI app: security stack -> RootGate -> /api/roots + no-folder mode, or the current
-    inner app. Switch = build + validate, start the new lifespan, swap under a lock, stop the old
+    """Outer ASGI app: security stack -> RootGate -> /api/roots, /api/seen + no-folder mode, or
+    the current inner app. Switch = build + validate, start the new lifespan, swap under a lock, stop the old
     one (its SSE streams end; clients reconnect / reload)."""
 
     _DEFAULT = object()
@@ -227,6 +242,7 @@ class RootSwitcher:
         self._lock = asyncio.Lock()
         self._picking = False
         self.state = load_state(settings.data_dir)
+        self.seen = SeenDB(settings.data_dir)  # changes history, shared by every root (namespaced)
         self.control = self._build_control()
         origins = {f"http://{h}:{p}" for h in ALLOWED_HOSTS for p in (settings.port, DEV_UI_PORT)}
         gate = RootGate(self._dispatch, token=self.token, origins=origins, locked=self.locked)
@@ -268,8 +284,11 @@ class RootSwitcher:
         return {"current": self.current, "recent": self.recent(),
                 "picker_available": self.picker is not None, "switch_enabled": not self.locked}
 
-    def _config_extra(self, request: Request) -> dict:
-        out: dict = {"root_switch_enabled": not self.locked}
+    def _seen_enabled(self, settings: Settings | None) -> bool:
+        return settings is not None and seen_disabled_reason(settings) is None and self.seen.available()
+
+    def _config_extra(self, request: Request, settings: Settings | None = None) -> dict:
+        out: dict = {"root_switch_enabled": not self.locked, "seen_enabled": self._seen_enabled(settings)}
         if _same_site_request(request):
             out["root_token"] = self.token
         return out
@@ -278,7 +297,7 @@ class RootSwitcher:
 
     async def _start(self, settings: Settings) -> _Inner:
         app = create_app(settings)  # ConfigError: e.g. data dir overlaps the root while editing
-        app.state.config_extra = self._config_extra
+        app.state.config_extra = lambda request: self._config_extra(request, settings)
         inner = _Inner(app)
         await inner.start()
         return inner
@@ -294,6 +313,7 @@ class RootSwitcher:
             inner, self.inner = self.inner, None
             if inner is not None:
                 await inner.stop()
+            self.seen.close()
 
     async def switch_to(self, path: str) -> str:
         """Serve `path` (already vetted: from the dialog, the CLI or the recent list)."""
@@ -340,7 +360,7 @@ class RootSwitcher:
 
     async def _dispatch(self, scope, receive, send):
         inner = self.inner  # captured once: an in-flight request finishes on the app it started on
-        if inner is not None and not is_roots_path(scope.get("path", "")):
+        if inner is not None and not is_gated_path(scope.get("path", "")):
             return await inner.app(scope, receive, send)
         await self.control(scope, receive, send)
 
@@ -403,6 +423,8 @@ class RootSwitcher:
             self._save()
             return j(self.roots_info())
 
+        register_seen_routes(app, self.seen, lambda: self.inner)
+
         @app.api_route(ROOTS_PREFIX + "/{rest:path}", methods=["GET", "HEAD", "POST"])
         async def roots_not_found(rest: str):
             return j({"detail": "Not Found"}, 404)
@@ -415,7 +437,7 @@ class RootSwitcher:
                       "deny_patterns": list(s.deny), "ignore_patterns": list(s.ignore),
                       "upload_ext": list(s.upload_ext), "upload_max_bytes": s.upload_max_bytes,
                       "edit_max_bytes": s.edit_max_bytes, "upload_max_files": MAX_UPLOAD_FILES,
-                      **self._config_extra(request)})
+                      "git_enabled": False, **self._config_extra(request)})
 
         @app.api_route("/api/{rest:path}", methods=["GET", "HEAD", "POST", "PUT", "DELETE"])
         async def no_root(rest: str):

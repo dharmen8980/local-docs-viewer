@@ -20,7 +20,7 @@ import { errorMessage, formatBytes } from "@/lib/api";
 import { editApi, formatWhen, loadEditable, whenMs, type HistoryVersion } from "@/lib/edit-api";
 import { useReturnFocus } from "@/lib/return-focus";
 import { cn } from "@/lib/utils";
-import { DiffView } from "./diff-view";
+import { DiffView } from "@/components/diff/diff-view";
 
 export function HistorySheet({
   path,

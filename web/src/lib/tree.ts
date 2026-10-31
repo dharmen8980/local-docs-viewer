@@ -68,11 +68,10 @@ export function findDir(root: DirNode, path: string): DirNode | null {
   return node ?? null;
 }
 
-/** The tree with only files of the given kinds; folders left without files are dropped. Empty set: no filter. */
-export function filterKinds(root: DirNode, kinds: ReadonlySet<FileKind>): DirNode {
-  if (!kinds.size) return root;
+/** The tree with only the files `keep` accepts; folders left without files are dropped. */
+export function filterFiles(root: DirNode, keep: (f: FileEntry) => boolean): DirNode {
   const walk = (n: DirNode): DirNode | null => {
-    const files = n.files.filter((f) => kinds.has(f.kind));
+    const files = n.files.filter(keep);
     const dirs = n.dirs.map(walk).filter((d): d is DirNode => d !== null);
     if (n.path && !files.length && !dirs.length) return null;
     let mtime = 0;
@@ -85,4 +84,9 @@ export function filterKinds(root: DirNode, kinds: ReadonlySet<FileKind>): DirNod
     return { ...n, files, dirs, mtime, fileCount };
   };
   return walk(root) ?? root;
+}
+
+/** The tree with only files of the given kinds. Empty set: no filter. */
+export function filterKinds(root: DirNode, kinds: ReadonlySet<FileKind>): DirNode {
+  return kinds.size ? filterFiles(root, (f) => kinds.has(f.kind)) : root;
 }

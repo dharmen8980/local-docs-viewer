@@ -16,9 +16,13 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { ChangeBanner, ChangesDiff, type BannerMode } from "@/components/changes/change-banner";
+import { ChangesContext, FileChangeContext, useFileChanges } from "@/components/changes/changes-context";
 import { hasDrag, ownMoves, useEditOps } from "@/components/edit/edit-context";
 import type { EditorPaneHandle } from "@/components/edit/editor-pane";
 import { FileOpsProvider } from "@/components/edit/file-ops";
+import { BlameView } from "@/components/git/blame-view";
+import { GitContext, useGit, useGitCompare, useGitState, type GitViewMode } from "@/components/git/git-context";
 import { SidebarInset, SidebarProvider, useSidebar } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FileHeader } from "@/components/file-header";
@@ -37,15 +41,20 @@ import { MermaidViewer } from "@/components/viewers/mermaid-viewer";
 import { PdfViewer } from "@/components/viewers/pdf-viewer";
 import { TextViewer } from "@/components/viewers/text-viewer";
 import { XlsxViewer } from "@/components/viewers/xlsx-viewer";
+import { useChangeTracker } from "@/hooks/use-change-tracker";
 import { useEvents } from "@/hooks/use-events";
 import { setNavigationGuard, useRoute } from "@/hooks/use-route";
 import { useTree } from "@/hooks/use-tree";
 import { api, ApiError, errorMessage, type AppConfig, type ChangeEvent, type FileInfo, type FileKind } from "@/lib/api";
+import { CONTENT_MAX, remapPath, TEXT_KINDS } from "@/lib/change-rules";
 import { configureEditClient } from "@/lib/edit-api";
 import { isEditable } from "@/lib/editor-lang";
+import { isTypingTarget } from "@/lib/keys";
 import { configureRootsClient } from "@/lib/roots-api";
 import { ancestors, basename, dirname } from "@/lib/paths";
 import { buildTree, findDir, type SortMode } from "@/lib/tree";
+
+const EMPTY_SET: ReadonlySet<string> = new Set();
 
 // The editor (and CodeMirror) is only downloaded when someone actually edits.
 const EditorPane = lazy(() => import("@/components/edit/editor-pane").then((m) => ({ default: m.EditorPane })));
@@ -63,12 +72,6 @@ const VIEWERS: Record<FileKind, React.ComponentType<ViewerProps>> = {
   binary: BinaryViewer,
 };
 
-function isTypingTarget(el: EventTarget | null): boolean {
-  if (!(el instanceof HTMLElement)) return false;
-  const tag = el.tagName;
-  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
-}
-
 function FileView({
   path,
   reloadKey,
@@ -81,6 +84,31 @@ function FileView({
   state: AsyncState<FileInfo | null>;
 }) {
   const { data: file, error, loading } = state;
+  // Hooks first: the early returns below would skip them.
+  const fc = useFileChanges(file && !deleted ? file : null);
+  // ---------- git: the diff against the last commit, or blame (only with git_enabled) ----------
+  const git = useGit();
+  const setGitView = git?.setView;
+  const mode = git?.view?.path === path ? git.view.mode : null;
+  const entry = git?.byPath.get(path) ?? null;
+  const gone = deleted || (!file && error instanceof ApiError && error.status === 404);
+  const deletedInGit = gone && entry?.status === "D";
+  const closeGit = useCallback(() => setGitView?.(null), [setGitView]);
+  const live = gone ? null : file;
+  const version = `${live ? `${live.mtime}:${live.size}` : "gone"}:${entry?.status ?? "-"}:${git?.status?.head ?? "-"}:${reloadKey}`;
+  const gfc = useGitCompare(path, live, Boolean(git) && ((mode === "compare" && Boolean(live)) || deletedInGit), version, closeGit);
+  const onMode = useCallback(
+    (m: BannerMode) => setGitView?.(m === "git" ? { path, mode: "compare" } : null),
+    [setGitView, path],
+  );
+  if (deletedInGit && gfc) {
+    return (
+      <FileChangeContext.Provider value={gfc}>
+        <ChangeBanner state={gfc} git={gfc} kind={entry?.kind ?? "text"} />
+        <ChangesDiff state={gfc} git={gfc} />
+      </FileChangeContext.Provider>
+    );
+  }
   if (deleted) {
     return (
       <div className="p-6">
@@ -111,7 +139,24 @@ function FileView({
     return loading ? <ViewerLoading /> : null;
   }
   const Viewer = VIEWERS[file.kind] ?? TextViewer;
-  return <Viewer key={file.path} file={file} reloadKey={reloadKey} />;
+  const blame = mode === "blame";
+  const shown = blame ? null : (gfc ?? fc);
+  const diffing = Boolean(shown?.changed && shown.showDiff);
+  return (
+    <FileChangeContext.Provider value={shown}>
+      {gfc && !blame ? (
+        <ChangeBanner state={gfc} git={gfc} kind={file.kind} onMode={fc?.changed ? onMode : undefined} />
+      ) : fc?.changed && !blame ? (
+        <ChangeBanner state={fc} kind={file.kind} onMode={git ? onMode : undefined} />
+      ) : null}
+      {blame ? <BlameView path={file.path} version={version} onClose={closeGit} /> : null}
+      {shown && diffing ? <ChangesDiff state={shown} git={gfc ?? undefined} /> : null}
+      {/* Stays mounted under the diff: scroll position and rendered diagrams survive the toggle. */}
+      <div hidden={diffing || blame}>
+        <Viewer key={file.path} file={file} reloadKey={reloadKey} />
+      </div>
+    </FileChangeContext.Provider>
+  );
 }
 
 /** Main content area; with editing enabled, OS files dropped here are uploaded to `dropDir`. */
@@ -174,6 +219,11 @@ function Shell({ initialConfig }: { initialConfig: AppConfig | null }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [deletedPath, setDeletedPath] = useState<string | null>(null);
+  // ---------- "changed since you last looked" (history kept by the server) ----------
+  const changes = useChangeTracker(config?.seen_enabled ? config.root_path : null, tree);
+  // ---------- read-only git views (uncommitted changes, last commit, blame) ----------
+  const git = useGitState(Boolean(config?.git_enabled), tree?.version);
+  const [changedOnly, setChangedOnly] = useState(false);
   // ---------- editing (tier 3, only when the server says so) ----------
   const editEnabled = Boolean(config?.edit_enabled && config.edit_token);
   /** The open edit session. `from` is the previous path while following a rename. */
@@ -248,6 +298,7 @@ function Shell({ initialConfig }: { initialConfig: AppConfig | null }) {
     } catch {
       // ignore a corrupt saved value
     }
+    setChangedOnly(window.localStorage.getItem("viewer.changedOnly") === "1");
   }, []);
   const changeKinds = useCallback((k: FileKind[]) => {
     setKinds(k);
@@ -257,6 +308,18 @@ function Shell({ initialConfig }: { initialConfig: AppConfig | null }) {
     setSort(s);
     window.localStorage.setItem("viewer.sort", s);
   }, []);
+  const changeChangedOnly = useCallback((on: boolean) => {
+    setChangedOnly(on);
+    window.localStorage.setItem("viewer.changedOnly", on ? "1" : "0");
+  }, []);
+  // Leaving a file (to another file, a folder or home) records the version that was on screen.
+  // A route effect, not an unmount cleanup: StrictMode re-runs cleanups.
+  const { flushPending, rename: renameChanges, expectOwnWrite, ownSave, onSeenEvent, resync: resyncChanges } = changes;
+  const onSaved = useCallback(
+    (path: string, saved: { mtime: number; size: number; text: string }) => ownSave({ path, ...saved }),
+    [ownSave],
+  );
+  useEffect(() => flushPending(route.path), [route.path, flushPending]);
 
   const root = useMemo(() => (tree ? buildTree(tree) : null), [tree]);
   const rootName = config?.root_name ?? "viewer";
@@ -272,10 +335,13 @@ function Shell({ initialConfig }: { initialConfig: AppConfig | null }) {
   }, []);
 
   const exitEdit = useCallback(() => {
+    // A save from the editor is the user's own change: no "changed since viewed" for it.
+    const e = editRef.current;
+    if (e) expectOwnWrite(e.path, e.file.mtime);
     setEdit(null);
     setDirty(false);
     setReloadKey((k) => k + 1);
-  }, [setDirty]);
+  }, [setDirty, expectOwnWrite]);
 
   // While editing: guard in-app navigation, and the tab itself when there are unsaved changes.
   const isEditing = edit !== null;
@@ -365,6 +431,16 @@ function Shell({ initialConfig }: { initialConfig: AppConfig | null }) {
     [navigate, isMobile, setOpenMobile],
   );
 
+  const setGitView = git?.setView;
+  /** Uncommitted feed: open the file showing its changes since the last commit. */
+  const onOpenGit = useCallback(
+    (path: string) => {
+      setGitView?.({ path, mode: "compare" });
+      onOpen(path);
+    },
+    [setGitView, onOpen],
+  );
+
   const onFolder = useCallback(
     (path: string) => {
       setFilter("");
@@ -383,6 +459,8 @@ function Shell({ initialConfig }: { initialConfig: AppConfig | null }) {
   const onChange = useCallback(
     (ev: ChangeEvent) => {
       refresh();
+      // Before any navigation: following a rename is not leaving the file.
+      for (const r of ev.renames) renameChanges(r.from, r.to);
       const cur = pathRef.current;
       if (!cur) return;
       const editing = editRef.current && editRef.current.path === cur ? editorRef.current : null;
@@ -413,7 +491,7 @@ function Shell({ initialConfig }: { initialConfig: AppConfig | null }) {
         editing?.externalChange("modified");
       }
     },
-    [refresh, navigate],
+    [refresh, navigate, renameChanges],
   );
   /** Follow a folder switch from another tab, or a restart with another / no folder. */
   const checkRoot = useCallback(() => {
@@ -443,11 +521,12 @@ function Shell({ initialConfig }: { initialConfig: AppConfig | null }) {
     setReloadKey((k) => k + 1);
     // Changes may have been missed while disconnected: let the editor compare with the disk.
     if (editRef.current) editorRef.current?.externalChange("modified");
+    resyncChanges();
     // The stream also drops when the folder is switched (from another tab): follow it.
     checkRoot();
-  }, [refresh, checkRoot]);
+  }, [refresh, checkRoot, resyncChanges]);
   // A stream that keeps failing (409 with no folder selected) never reopens: re-check there too.
-  const liveStatus = useEvents(onChange, onReconnect, checkRoot);
+  const liveStatus = useEvents(onChange, onReconnect, checkRoot, onSeenEvent);
 
   // Keyboard: "/" and Cmd/Ctrl-K open search.
   useEffect(() => {
@@ -510,7 +589,8 @@ function Shell({ initialConfig }: { initialConfig: AppConfig | null }) {
 
   const onMoved = useCallback(
     (from: string, to: string) => {
-      const remap = (p: string) => (p === from ? to : p.startsWith(`${from}/`) ? `${to}${p.slice(from.length)}` : null);
+      renameChanges(from, to);
+      const remap = (p: string) => remapPath(p, from, to);
       setExpanded((prev) => {
         let changed = false;
         const next = new Set<string>();
@@ -531,7 +611,7 @@ function Shell({ initialConfig }: { initialConfig: AppConfig | null }) {
       }
       navigate(next, { replace: true, force: true, hash: hashRef.current || undefined });
     },
-    [navigate],
+    [navigate, renameChanges],
   );
   const onRemoved = useCallback(
     (path: string) => {
@@ -576,6 +656,7 @@ function Shell({ initialConfig }: { initialConfig: AppConfig | null }) {
         handleRef={editorRef}
         onDirtyChange={setDirty}
         onExit={requestExit}
+        onSaved={onSaved}
       />
     );
   } else if (!route.path) {
@@ -592,6 +673,20 @@ function Shell({ initialConfig }: { initialConfig: AppConfig | null }) {
 
   const dropDir = isDir ? route.path : route.path ? dirname(route.path) : "";
 
+  // Header actions of the git views: for the open file (and a file deleted since the last commit).
+  const openFile = fileKey && !deleted ? fileState.data : null;
+  const gitEntry = git && route.path ? (git.byPath.get(route.path) ?? null) : null;
+  const gitMode: GitViewMode | null = git?.view?.path === route.path ? git.view.mode : null;
+  const gitHeader =
+    git && !showEditor && (openFile?.path === route.path || gitEntry?.status === "D")
+      ? {
+          status: gitEntry?.status ?? null,
+          mode: gitMode,
+          canBlame: Boolean(openFile && TEXT_KINDS.has(openFile.kind) && openFile.size <= CONTENT_MAX && gitEntry?.status !== "??"),
+          onMode: (m: GitViewMode | null) => git.setView(m ? { path: route.path, mode: m } : null),
+        }
+      : undefined;
+
   return (
     <FileOpsProvider
       enabled={editEnabled}
@@ -606,76 +701,88 @@ function Shell({ initialConfig }: { initialConfig: AppConfig | null }) {
       hasUnsaved={hasUnsaved}
       editorText={editorText}
     >
-      <MenuFolderPick beforeSwitch={confirmLeave} onLeave={onLeave} />
-      <FileTree
-        tree={tree}
-        root={root}
-        loading={loading}
-        error={error}
-        rootName={rootName}
-        rootPath={config?.root_path}
-        rootSwitcher={
-          config?.root_switch_enabled ? (
-            <RootSwitcher rootPath={config.root_path ?? null} beforeSwitch={confirmLeave} onLeave={onLeave} />
-          ) : null
-        }
-        sort={sort}
-        onSortChange={changeSort}
-        kinds={kinds}
-        onKindsChange={changeKinds}
-        filter={filter}
-        onFilterChange={setFilter}
-        expanded={expanded}
-        onToggle={onToggle}
-        activePath={route.path}
-        onOpen={onOpen}
-      />
-      <SidebarInset className="min-w-0">
-        <FileHeader
-          rootName={rootName}
-          repoPrefix={config?.repo_prefix ?? ""}
-          path={route.path}
-          file={fileKey && !deleted ? fileState.data : null}
-          isDir={isDir}
-          liveStatus={liveStatus}
-          onFolder={onFolder}
-          onSearch={() => setSearchOpen(true)}
-          editEnabled={editEnabled}
-          editing={showEditor}
-          dirty={dirty}
-          onEdit={editEnabled && !showEditor && !deleted && isEditable(fileState.data) && fileState.data?.path === route.path ? startEdit : undefined}
-          onDone={requestExit}
-        />
-        <MainArea dropDir={dropDir} acceptDrops={!showEditor}>
-          {body}
-        </MainArea>
-      </SidebarInset>
-      <SearchDialog open={searchOpen} onOpenChange={setSearchOpen} folders={folders} onSelect={onSearchSelect} />
-      {editEnabled ? (
-        <AlertDialog open={!!unsaved} onOpenChange={(o) => !o && !savingForExit && (setUnsaved(null), setPendingEdit(null))}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Save changes to {basename(unsaved?.leaving ?? "") || "this file"}?</AlertDialogTitle>
-              <AlertDialogDescription>Your edits are not saved yet. If you discard them they are lost.</AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel disabled={savingForExit}>Cancel</AlertDialogCancel>
-              <Button variant="destructive" disabled={savingForExit} onClick={() => void resolveUnsaved("discard")}>
-                Discard
-              </Button>
-              <AlertDialogAction
-                disabled={savingForExit}
-                onClick={(e) => {
-                  e.preventDefault();
-                  void resolveUnsaved("save");
-                }}
-              >
-                {savingForExit ? "Saving..." : "Save"}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      ) : null}
+      <ChangesContext.Provider value={changes.enabled ? changes : null}>
+        <GitContext.Provider value={git}>
+          <MenuFolderPick beforeSwitch={confirmLeave} onLeave={onLeave} />
+          <FileTree
+            tree={tree}
+            root={root}
+            loading={loading}
+            error={error}
+            rootName={rootName}
+            rootPath={config?.root_path}
+            rootSwitcher={
+              config?.root_switch_enabled ? (
+                <RootSwitcher rootPath={config.root_path ?? null} beforeSwitch={confirmLeave} onLeave={onLeave} />
+              ) : null
+            }
+            sort={sort}
+            onSortChange={changeSort}
+            kinds={kinds}
+            onKindsChange={changeKinds}
+            filter={filter}
+            onFilterChange={setFilter}
+            expanded={expanded}
+            onToggle={onToggle}
+            activePath={route.path}
+            onOpen={onOpen}
+            changed={changes.enabled ? changes.changed : EMPTY_SET}
+            changesEnabled={changes.enabled}
+            changedOnly={changedOnly}
+            onChangedOnlyChange={changeChangedOnly}
+            onMarkAllSeen={changes.markAllSeen}
+            onClearHistory={changes.clearHistory}
+            onOpenGit={onOpenGit}
+          />
+          <SidebarInset className="min-w-0">
+            <FileHeader
+              rootName={rootName}
+              repoPrefix={config?.repo_prefix ?? ""}
+              path={route.path}
+              file={fileKey && !deleted ? fileState.data : null}
+              isDir={isDir}
+              liveStatus={liveStatus}
+              onFolder={onFolder}
+              onSearch={() => setSearchOpen(true)}
+              editEnabled={editEnabled}
+              editing={showEditor}
+              dirty={dirty}
+              onEdit={editEnabled && !showEditor && !deleted && isEditable(fileState.data) && fileState.data?.path === route.path ? startEdit : undefined}
+              onDone={requestExit}
+              git={gitHeader}
+            />
+            <MainArea dropDir={dropDir} acceptDrops={!showEditor}>
+              {body}
+            </MainArea>
+          </SidebarInset>
+          <SearchDialog open={searchOpen} onOpenChange={setSearchOpen} folders={folders} onSelect={onSearchSelect} />
+          {editEnabled ? (
+            <AlertDialog open={!!unsaved} onOpenChange={(o) => !o && !savingForExit && (setUnsaved(null), setPendingEdit(null))}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Save changes to {basename(unsaved?.leaving ?? "") || "this file"}?</AlertDialogTitle>
+                  <AlertDialogDescription>Your edits are not saved yet. If you discard them they are lost.</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={savingForExit}>Cancel</AlertDialogCancel>
+                  <Button variant="destructive" disabled={savingForExit} onClick={() => void resolveUnsaved("discard")}>
+                    Discard
+                  </Button>
+                  <AlertDialogAction
+                    disabled={savingForExit}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      void resolveUnsaved("save");
+                    }}
+                  >
+                    {savingForExit ? "Saving..." : "Save"}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          ) : null}
+        </GitContext.Provider>
+      </ChangesContext.Provider>
     </FileOpsProvider>
   );
 }

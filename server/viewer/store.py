@@ -305,7 +305,13 @@ class Store:
 
     def publish(self, change: Change) -> None:
         """Must be called on the event loop thread."""
-        data = change.to_json()
+        self._put(change.to_json())
+
+    def publish_event(self, event: str, data: dict) -> None:
+        """Another SSE event type on the same stream (e.g. "seen"); event loop thread only."""
+        self._put((event, data))
+
+    def _put(self, data) -> None:
         for q in list(self._subscribers):
             if q.full():
                 try:

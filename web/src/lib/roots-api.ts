@@ -1,4 +1,4 @@
-// Client for the folder switcher (/api/roots*). Relative same-origin URLs only.
+// Client for the folder switcher (/api/roots*); its token also guards /api/seen*. Relative same-origin URLs only.
 // Mutations carry the per-launch X-Root-Token and a JSON body. A browser can
 // never name an arbitrary path: switch only accepts folders already in the
 // server's recent list; new folders only come in via the native dialog.
@@ -19,6 +19,18 @@ let token = "";
 /** Set the roots token (from /api/config). It belongs to the server launch, not to a root. */
 export function configureRootsClient(t: string | undefined) {
   if (t) token = t;
+}
+
+/** The current roots token (also guards the changes history, /api/seen*). */
+export function rootToken(): string {
+  return token;
+}
+
+/** Re-read the token from /api/config (the server may have restarted); null if there is none. */
+export async function refreshRootToken(): Promise<string | null> {
+  const fresh = await api.config().then((c) => c.root_token ?? null, () => null);
+  if (fresh) token = fresh;
+  return fresh;
 }
 
 function detailMessage(status: number, body: unknown, fallback: string): string {
@@ -52,11 +64,8 @@ async function request<T>(method: string, url: string, json?: unknown, signal?: 
     if (res.status === 403 && method !== "GET") {
       // The server may have restarted with a new token: re-read it once and retry.
       const before = token;
-      const fresh = await api.config().then((c) => c.root_token ?? null, () => null);
-      if (fresh && fresh !== before) {
-        token = fresh;
-        res = await send(method, url, json, signal);
-      }
+      const fresh = await refreshRootToken();
+      if (fresh && fresh !== before) res = await send(method, url, json, signal);
     }
   } catch (e) {
     if ((e as Error).name === "AbortError") throw e;

@@ -11,6 +11,8 @@ import {
   FilePlusIcon,
   FolderInputIcon,
   FolderPlusIcon,
+  GitCommitHorizontalIcon,
+  GitCompareArrowsIcon,
   HistoryIcon,
   MonitorIcon,
   MoonIcon,
@@ -46,7 +48,9 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { formatBytes, formatRelative, formatTime, rawUrl, type FileInfo } from "@/lib/api";
+import { formatBytes, formatRelative, formatTime, rawUrl, type FileInfo, type GitStatusCode } from "@/lib/api";
+import type { GitViewMode } from "@/components/git/git-context";
+import { GIT_STATUS_WORDS } from "@/lib/git";
 import { dirname, viewerHref } from "@/lib/paths";
 import { useEditOps } from "@/components/edit/edit-context";
 import { PdfMenu } from "@/components/pdf-menu";
@@ -120,6 +124,46 @@ export interface FileHeaderProps {
   onEdit?: () => void;
   /** leave the editor (prompts when there are unsaved changes) */
   onDone?: () => void;
+  /** read-only git views of the open file (absent: git is off for this folder) */
+  git?: {
+    /** uncommitted status of the file, null when it is the same as in the last commit */
+    status: GitStatusCode | null;
+    mode: GitViewMode | null;
+    canBlame: boolean;
+    onMode: (m: GitViewMode | null) => void;
+  };
+}
+
+/** Toggles of the git views: changes since the last commit, and blame. */
+function GitButtons({ git }: { git: NonNullable<FileHeaderProps["git"]> }) {
+  const compare = git.mode === "compare";
+  const blame = git.mode === "blame";
+  const word = git.status ? GIT_STATUS_WORDS[git.status] : null;
+  return (
+    <>
+      <IconButton
+        label={compare ? "Hide changes since the last commit" : `Changes since the last commit${word ? ` (${word})` : ""}`}
+        aria-pressed={compare}
+        className={cn("relative", compare && "bg-accent")}
+        onClick={() => git.onMode(compare ? null : "compare")}
+      >
+        <GitCompareArrowsIcon />
+        {git.status ? (
+          <span className="absolute top-1 right-1 size-1.5 rounded-full bg-amber-500" aria-hidden />
+        ) : null}
+      </IconButton>
+      {git.canBlame ? (
+        <IconButton
+          label={blame ? "Hide blame" : "Blame: who last changed each line"}
+          aria-pressed={blame}
+          className={cn(blame && "bg-accent")}
+          onClick={() => git.onMode(blame ? null : "blame")}
+        >
+          <GitCommitHorizontalIcon />
+        </IconButton>
+      ) : null}
+    </>
+  );
 }
 
 /** "..." menu with the file-management actions for the open file, folder or root. */
@@ -204,6 +248,7 @@ export function FileHeader({
   dirty = false,
   onEdit,
   onDone,
+  git,
 }: FileHeaderProps) {
   const parts = path ? path.split("/") : [];
   const crumbs = parts.map((name, i) => ({ name, path: parts.slice(0, i + 1).join("/") }));
@@ -315,6 +360,7 @@ export function FileHeader({
             {liveStatus === "open" ? "Live updates connected" : liveStatus === "connecting" ? "Connecting..." : "Live updates disconnected, retrying"}
           </TooltipContent>
         </Tooltip>
+        {git ? <GitButtons git={git} /> : null}
         {path ? (
           <IconButton label="Copy path" onClick={copyPath}>
             <CopyIcon />

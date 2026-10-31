@@ -80,7 +80,26 @@ Sec-Fetch-Site / content-type gate, `--lock-root`, edit mode per folder and
 the data-dir overlap refusal, the old app's SSE streams and background tasks
 ending after a switch, and serialised concurrent switches. No test opens a
 real dialog. All of them use `tmp_path` roots and data dirs.
-`test_desktop.py` covers desktop mode against a fake bridge: picker success,
+`test_seen.py` covers the changes history (`/api/seen*`): commit / get /
+snapshot / mark / rename / clear, commits by SHA-256 (match, file changed
+again, missing file, over 2 MB, malformed digest), snapshot and record limits with oldest-first
+pruning (and a full disk keeping the record without text), file and folder
+renames, namespacing by root and refusal of a stale root after a switch,
+`--lock-root` (history writes still allowed while `/api/roots` POSTs get
+403) and no-folder mode, the token / Origin / Sec-Fetch-Site / Host /
+content-type gate and body limit, path traversal and denied names, the
+data-dir overlap and unwritable data dir turning it off, and the `seen` SSE
+event. `test_git.py` (skipped when git is missing) builds real temporary
+repositories: status with M/A/D/R/?? and line counts, denied and ignored names
+hidden, a root in a subfolder of the repository, the last commit's version
+(unchanged, new, deleted, renamed, binary), a denied file in history, a rename
+away from a denied name and a symlink to one refused, blame and its size limit, a malicious repository config
+(`core.fsmonitor`, `diff.external`, `textconv`, clean/smudge and `process`
+filters, hooks, pager) pointing at a script that would create a marker file
+and never does, nothing written inside the repository, not a repository and
+`--git off` turning git off, a root inside `.git`, cross-site requests and
+other methods refused, timeouts killing git, the output cap, finding git and
+the setting, and an unborn `HEAD`. `test_desktop.py` covers desktop mode against a fake bridge: picker success,
 cancel, 409, timeout and token refusal; PDF success, the payload (same-origin
 `/print` URL and query, templates, margins, timeouts) and every error-status
 mapping; the CLI refusing `--desktop` without the bridge env, printing
@@ -88,3 +107,15 @@ mapping; the CLI refusing `--desktop` without the bridge env, printing
 playwright is never imported.
 
 Frontend checks: `cd web && npm run lint && npx tsc --noEmit`.
+
+Frontend unit tests: `cd web && npm test`. They use `node --test`, which runs the
+TypeScript files in `web/test/` directly (Node 23.6 or newer), and cover the
+diff engine and the change summary (`src/lib/diff.ts`), the change rules (`src/lib/change-rules.ts`),
+the What's new list and its lazy summary loader (`src/lib/whats-new.ts`: order,
+cache keys, bounded concurrency, LRU, retry after a failure),
+the markdown change marks (`src/lib/rehype-change-marks.ts`) and the
+server-backed history client (`src/lib/seen-store.ts`, against a fake
+`fetch`: the keepalive cap and the digest fallback, clear) and the git views'
+pure parts (`src/lib/git.ts`: Uncommitted rows and details, blame grouping
+and chunk merging). CI runs them
+in the desktop-release workflow (`package.json` declares `engines.node >=23.6`).

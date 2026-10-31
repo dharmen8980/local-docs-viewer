@@ -1,14 +1,16 @@
 "use client";
 
-import { memo, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowDownAZIcon,
   ArrowUpDownIcon,
   CalendarClockIcon,
+  CheckCheckIcon,
   ChevronRightIcon,
   ClockIcon,
   CopyIcon,
   CopyPlusIcon,
+  EraserIcon,
   FilePlusIcon,
   FolderIcon,
   FolderInputIcon,
@@ -17,10 +19,22 @@ import {
   FunnelIcon,
   HistoryIcon,
   PencilLineIcon,
+  SparklesIcon,
   Trash2Icon,
   UploadIcon,
   XIcon,
 } from "lucide-react";
+import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -53,17 +67,25 @@ import {
   SidebarHeader,
   SidebarInput,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarMenuSkeleton,
   SidebarMenuSub,
   SidebarRail,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FileKindIcon } from "@/components/file-icon";
+import { useChanges } from "@/components/changes/changes-context";
+import { useChangesSource, WhatsNewPanel } from "@/components/changes/whats-new";
+import { useGit } from "@/components/git/git-context";
+import { useUncommittedSource } from "@/components/git/uncommitted-source";
+import { isTypingTarget } from "@/lib/keys";
 import { formatRelative, type FileEntry, type FileKind, type TreeResponse } from "@/lib/api";
+import { changedDirsOf } from "@/lib/change-rules";
 import { dirname, viewerHref } from "@/lib/paths";
-import { filterKinds, sortDirs, sortFiles, type DirNode, type SortMode } from "@/lib/tree";
+import { filterFiles, sortDirs, sortFiles, type DirNode, type SortMode } from "@/lib/tree";
 import { cn } from "@/lib/utils";
 
 interface TreeCtx {
@@ -74,6 +96,12 @@ interface TreeCtx {
   onOpen: (path: string) => void;
   /** file-management actions; null when editing is disabled */
   ops: EditOps | null;
+  /** files changed since they were last viewed (the open file included: it is seen when left) */
+  changed: ReadonlySet<string>;
+  /** folders containing such files -> how many */
+  changedDirs: ReadonlyMap<string, number>;
+  /** "Changed since viewed" filter on: folder counts are changed counts */
+  changedOnly: boolean;
 }
 
 const DROP_CLASS = "data-[drop=true]:bg-primary/15 data-[drop=true]:ring-1 data-[drop=true]:ring-primary";
@@ -187,6 +215,7 @@ function FileLink({
   label,
   hint,
   ops,
+  changed = false,
 }: {
   file: FileEntry;
   active: boolean;
@@ -194,6 +223,8 @@ function FileLink({
   label?: string;
   hint?: string;
   ops?: EditOps | null;
+  /** changed since the user last viewed it */
+  changed?: boolean;
 }) {
   const button = (
     <SidebarMenuButton
@@ -205,7 +236,11 @@ function FileLink({
     >
       <a
         href={viewerHref(file.path)}
-        title={file.path}
+        title={
+          changed
+            ? `${file.path} · changed since you last viewed it${active ? " (counts as seen when you leave it)" : ""}`
+            : file.path
+        }
         onClick={(e) => {
           if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
           e.preventDefault();
@@ -215,6 +250,19 @@ function FileLink({
       >
         <FileKindIcon kind={file.kind} className="text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate">{label ?? file.name}</span>
+        {changed ? (
+          <>
+            {/* The open file: a ring until it counts as seen (on leave or Mark as seen). */}
+            <span
+              className={cn(
+                "size-2 shrink-0 rounded-full",
+                active ? "border-2 border-sky-500 dark:border-sky-400" : "bg-sky-500 dark:bg-sky-400",
+              )}
+              aria-hidden
+            />
+            <span className="sr-only">changed since you last viewed it</span>
+          </>
+        ) : null}
         {hint ? <span className="ml-1 shrink-0 text-[10px] text-muted-foreground">{hint}</span> : null}
       </a>
     </SidebarMenuButton>
@@ -234,6 +282,30 @@ function FileLink({
 
 const DirItem = memo(function DirItem({ node, ctx }: { node: DirNode; ctx: TreeCtx }) {
   const open = ctx.expanded.has(node.path);
+  const nChanged = ctx.changedDirs.get(node.path) ?? 0;
+  const changedLabel = `${nChanged} changed file${nChanged === 1 ? "" : "s"}`;
+  const title = nChanged ? `${node.path} · ${changedLabel} since you last viewed them` : node.path;
+  const FolderGlyph = open ? FolderOpenIcon : FolderIcon;
+  const inner = (
+    <>
+      <ChevronRightIcon className={cn("transition-transform", open && "rotate-90")} />
+      {/* The change dot sits on the folder icon, away from the file count. */}
+      <span className="relative flex shrink-0">
+        <FolderGlyph className="size-4 text-muted-foreground" />
+        {nChanged ? (
+          <span
+            className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-sky-500 ring-2 ring-sidebar dark:bg-sky-400"
+            aria-hidden
+          />
+        ) : null}
+      </span>
+      <span className="min-w-0 flex-1 truncate">{node.name}</span>
+      {nChanged ? <span className="sr-only">{changedLabel}</span> : null}
+      <span className={cn("text-[10px]", ctx.changedOnly ? "text-sky-700 dark:text-sky-300" : "text-muted-foreground")}>
+        {ctx.changedOnly ? nChanged : node.fileCount}
+      </span>
+    </>
+  );
   return (
     <Collapsible asChild open={open} onOpenChange={(o) => ctx.onToggle(node.path, o)}>
       <SidebarMenuItem>
@@ -243,25 +315,19 @@ const DirItem = memo(function DirItem({ node, ctx }: { node: DirNode; ctx: TreeC
               <SidebarMenuButton
                 size="sm"
                 data-dir={node.path}
-                title={node.path}
+                title={title}
                 className={cn("h-7", DROP_CLASS)}
                 draggable
                 onDragStart={(e) => startRowDrag(e, node.path, true)}
               >
-                <ChevronRightIcon className={cn("transition-transform", open && "rotate-90")} />
-                {open ? <FolderOpenIcon className="text-muted-foreground" /> : <FolderIcon className="text-muted-foreground" />}
-                <span className="min-w-0 flex-1 truncate">{node.name}</span>
-                <span className="text-[10px] text-muted-foreground">{node.fileCount}</span>
+                {inner}
               </SidebarMenuButton>
             </CollapsibleTrigger>
           </FolderMenu>
         ) : (
           <CollapsibleTrigger asChild>
-            <SidebarMenuButton size="sm" data-dir={node.path} title={node.path} className="h-7">
-              <ChevronRightIcon className={cn("transition-transform", open && "rotate-90")} />
-              {open ? <FolderOpenIcon className="text-muted-foreground" /> : <FolderIcon className="text-muted-foreground" />}
-              <span className="min-w-0 flex-1 truncate">{node.name}</span>
-              <span className="text-[10px] text-muted-foreground">{node.fileCount}</span>
+            <SidebarMenuButton size="sm" data-dir={node.path} title={title} className="h-7">
+              {inner}
             </SidebarMenuButton>
           </CollapsibleTrigger>
         )}
@@ -284,7 +350,14 @@ function DirChildren({ node, ctx }: { node: DirNode; ctx: TreeCtx }) {
         <DirItem key={d.path} node={d} ctx={ctx} />
       ))}
       {files.map((f) => (
-        <FileLink key={f.path} file={f} active={f.path === ctx.activePath} onOpen={ctx.onOpen} ops={ctx.ops} />
+        <FileLink
+          key={f.path}
+          file={f}
+          active={f.path === ctx.activePath}
+          onOpen={ctx.onOpen}
+          ops={ctx.ops}
+          changed={ctx.changed.has(f.path)}
+        />
       ))}
       {dirs.length === 0 && files.length === 0 ? (
         <li className="px-2 py-1 text-xs text-muted-foreground italic">empty</li>
@@ -314,25 +387,125 @@ export interface FileTreeProps {
   onToggle: (path: string, open: boolean) => void;
   activePath: string;
   onOpen: (path: string) => void;
+  /** files changed since they were last viewed (all of them, the open file included) */
+  changed: ReadonlySet<string>;
+  /** the change history is available (kept by the server) */
+  changesEnabled: boolean;
+  /** show only files changed since viewed */
+  changedOnly: boolean;
+  onChangedOnlyChange: (on: boolean) => void;
+  onMarkAllSeen: () => void;
+  /** forget the folder's whole history; false if it failed */
+  onClearHistory: () => Promise<boolean>;
+  /** open a file showing its changes since the last commit (Uncommitted list) */
+  onOpenGit: (path: string) => void;
+}
+
+/** Confirm step of "Clear history…" (filter menu > Changes); outside the menu so focus returns properly. */
+function ClearHistoryDialog({ open, onOpenChange, onClear }: { open: boolean; onOpenChange: (o: boolean) => void; onClear: () => Promise<boolean> }) {
+  const [busy, setBusy] = useState(false);
+  const run = async () => {
+    setBusy(true);
+    const ok = await onClear();
+    setBusy(false);
+    onOpenChange(false);
+    if (ok) toast("Changes history cleared");
+    else toast.error("Could not clear the changes history");
+  };
+  return (
+    <AlertDialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Clear the changes history?</AlertDialogTitle>
+          <AlertDialogDescription>
+            The viewer forgets which version of each file in this folder you last viewed, and the saved copies used for
+            the highlights and diffs. Every dot and banner goes away, in every tab. Files count as never opened: they
+            get a dot again only after you view them and they change. This cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={busy}
+            variant="destructive"
+            onClick={(e) => {
+              e.preventDefault();
+              void run();
+            }}
+          >
+            {busy ? "Clearing..." : "Clear history"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
 }
 
 export function FileTree(props: FileTreeProps) {
-  const { tree, loading, error, sort, filter, kinds, expanded, activePath, onToggle, onOpen } = props;
+  const { tree, loading, error, sort, filter, kinds, expanded, activePath, onToggle, onOpen, changed } = props;
+  const changedOnly = props.changesEnabled && props.changedOnly;
+  const [confirmClear, setConfirmClear] = useState(false);
+  // ---------- What's new (a view of the sidebar, in place of the tree) ----------
+  const changesSource = useChangesSource(tree, useChanges());
+  const gitSource = useUncommittedSource(useGit(), props.onOpenGit);
+  const feedSources = useMemo(
+    () => [changesSource, gitSource].filter((s): s is NonNullable<typeof s> => s !== null),
+    [changesSource, gitSource],
+  );
+  /** the What's new entry's count: changed since viewed, else (git only) the uncommitted files */
+  const feedCount = changesSource ? changed.size : (gitSource?.items.length ?? 0);
+  const [feedOpen, setFeedOpen] = useState(false);
+  const showFeed = feedOpen && feedSources.length > 0;
+  const { open: sidebarOpen, openMobile, setOpen: setSidebarOpen, setOpenMobile, isMobile } = useSidebar();
+  // w: open / close What's new (ignored while typing; n / p are the banner's, / is search).
+  // With the sidebar hidden it always shows the feed, so one press is enough.
+  useEffect(() => {
+    if (!feedSources.length) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "w" || e.metaKey || e.ctrlKey || e.altKey || e.repeat || e.defaultPrevented) return;
+      if (isTypingTarget(e.target)) return;
+      e.preventDefault();
+      const shown = isMobile ? openMobile : sidebarOpen;
+      if (!shown) {
+        if (isMobile) setOpenMobile(true);
+        else setSidebarOpen(true);
+        setFeedOpen(true);
+      } else setFeedOpen(!feedOpen);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [feedSources.length, feedOpen, isMobile, openMobile, sidebarOpen, setOpenMobile, setSidebarOpen]);
   const kindSet = useMemo(() => new Set(kinds), [kinds]);
-  const root = useMemo(() => (props.root ? filterKinds(props.root, kindSet) : null), [props.root, kindSet]);
+  const changedDirs = useMemo(() => changedDirsOf(changed), [changed]);
+  /** File type and "changed since viewed" filters; the open file stays visible after a click. */
+  const keep = useCallback(
+    (f: FileEntry) =>
+      (!kindSet.size || kindSet.has(f.kind)) && (!changedOnly || changed.has(f.path) || f.path === activePath),
+    [kindSet, changedOnly, changed, activePath],
+  );
+  const root = useMemo(
+    () => (props.root && (kindSet.size || changedOnly) ? filterFiles(props.root, keep) : props.root),
+    [props.root, kindSet, changedOnly, keep],
+  );
   const kindCounts = useMemo(() => {
     const m = new Map<FileKind, number>();
     for (const f of tree?.files ?? []) m.set(f.kind, (m.get(f.kind) ?? 0) + 1);
     return m;
   }, [tree]);
+  const activeFilters = kinds.length + (changedOnly ? 1 : 0);
+  const filterParts = [
+    ...(kinds.length ? [`${kinds.length} file type${kinds.length === 1 ? "" : "s"}`] : []),
+    ...(changedOnly ? ["changed since viewed"] : []),
+  ];
+  const filterLabel = filterParts.length ? `Filter: ${filterParts.join(", ")}` : "Filter files";
   const contentRef = useRef<HTMLDivElement>(null);
   const ops = useEditOps();
   const dropEl = useRef<HTMLElement | null>(null);
   const expandTimer = useRef<{ dir: string; id: ReturnType<typeof setTimeout> } | null>(null);
 
   const ctx = useMemo<TreeCtx>(
-    () => ({ sort, expanded, activePath, onToggle, onOpen, ops }),
-    [sort, expanded, activePath, onToggle, onOpen, ops],
+    () => ({ sort, expanded, activePath, onToggle, onOpen, ops, changed, changedDirs, changedOnly }),
+    [sort, expanded, activePath, onToggle, onOpen, ops, changed, changedDirs, changedOnly],
   );
 
   // ---------- drag and drop (editing only) ----------
@@ -405,11 +578,11 @@ export function FileTree(props: FileTreeProps) {
     () =>
       tree
         ? tree.files
-            .filter((f) => !kindSet.size || kindSet.has(f.kind))
+            .filter(keep)
             .sort((a, b) => b.mtime - a.mtime)
             .slice(0, 10)
         : [],
-    [tree, kindSet],
+    [tree, keep],
   );
 
   const filtered = useMemo(() => {
@@ -417,7 +590,7 @@ export function FileTree(props: FileTreeProps) {
     if (!tree || !terms.length) return null;
     return tree.files
       .filter((f) => {
-        if (kindSet.size && !kindSet.has(f.kind)) return false;
+        if (!keep(f)) return false;
         const p = f.path.toLowerCase();
         return terms.every((t) => p.includes(t));
       })
@@ -427,7 +600,7 @@ export function FileTree(props: FileTreeProps) {
         return an - bn || a.path.localeCompare(b.path);
       })
       .slice(0, 300);
-  }, [tree, filter, kindSet]);
+  }, [tree, filter, keep]);
 
   // Keep the open file visible in the tree.
   useEffect(() => {
@@ -487,25 +660,23 @@ export function FileTree(props: FileTreeProps) {
               <TooltipTrigger asChild>
                 <DropdownMenuTrigger asChild>
                   <Button
-                    variant={kinds.length ? "secondary" : "ghost"}
+                    variant={activeFilters ? "secondary" : "ghost"}
                     size="icon-sm"
-                    aria-label="Filter by file type"
+                    aria-label="Filter files"
                     className="relative"
                   >
                     <FunnelIcon />
-                    {kinds.length ? (
+                    {activeFilters ? (
                       <span className="absolute -top-0.5 -right-0.5 flex size-3.5 items-center justify-center rounded-full bg-primary text-[9px] text-primary-foreground">
-                        {kinds.length}
+                        {activeFilters}
                       </span>
                     ) : null}
                   </Button>
                 </DropdownMenuTrigger>
               </TooltipTrigger>
-              <TooltipContent>
-                {kinds.length ? `Showing ${kinds.length} file type${kinds.length === 1 ? "" : "s"}` : "Filter by file type"}
-              </TooltipContent>
+              <TooltipContent>{filterLabel}</TooltipContent>
             </Tooltip>
-            <DropdownMenuContent align="end" className="min-w-48">
+            <DropdownMenuContent align="end" className="min-w-56">
               <DropdownMenuLabel>File types</DropdownMenuLabel>
               {KIND_LABELS.filter(([k]) => kindCounts.has(k) || kindSet.has(k)).map(([k, label]) => (
                 <DropdownMenuCheckboxItem
@@ -522,13 +693,39 @@ export function FileTree(props: FileTreeProps) {
                 </DropdownMenuCheckboxItem>
               ))}
               <DropdownMenuSeparator />
+              {props.changesEnabled ? (
+                <>
+                  <DropdownMenuLabel className="flex items-center gap-1.5">
+                    <HistoryIcon className="size-3.5" /> Changes
+                  </DropdownMenuLabel>
+                  <DropdownMenuCheckboxItem
+                    checked={changedOnly}
+                    onSelect={(e) => e.preventDefault()}
+                    onCheckedChange={(on) => props.onChangedOnlyChange(on === true)}
+                  >
+                    <span className="flex-1 whitespace-nowrap">Changed since viewed</span>
+                    <span className="size-2 shrink-0 rounded-full bg-sky-500 dark:bg-sky-400" aria-hidden />
+                    <span className="text-xs text-muted-foreground">{changed.size}</span>
+                  </DropdownMenuCheckboxItem>
+                  <DropdownMenuItem disabled={!changed.size} onSelect={() => props.onMarkAllSeen()}>
+                    <CheckCheckIcon /> Mark all as seen
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setConfirmClear(true)}>
+                    <EraserIcon /> Clear history…
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              ) : null}
               <DropdownMenuItem disabled={!kinds.length} onSelect={() => props.onKindsChange([])}>
                 <XIcon /> Show all types
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          {props.changesEnabled ? (
+            <ClearHistoryDialog open={confirmClear} onOpenChange={setConfirmClear} onClear={props.onClearHistory} />
+          ) : null}
         </div>
-        <div className="relative">
+        <div className="relative" hidden={showFeed}>
           <SidebarInput
             placeholder="Filter files..."
             value={filter}
@@ -566,7 +763,15 @@ export function FileTree(props: FileTreeProps) {
           </SidebarGroup>
         ) : null}
 
-        {filtered ? (
+        {showFeed ? (
+          <WhatsNewPanel
+            sources={feedSources}
+            activePath={activePath}
+            activeClassName={ACTIVE_CLASS}
+            onOpen={onOpen}
+            onClose={() => setFeedOpen(false)}
+          />
+        ) : filtered ? (
           <SidebarGroup>
             <SidebarGroupLabel>
               {filtered.length} match{filtered.length === 1 ? "" : "es"}
@@ -582,6 +787,7 @@ export function FileTree(props: FileTreeProps) {
                     label={f.name}
                     hint={dirname(f.path) || undefined}
                     ops={ops}
+                    changed={changed.has(f.path)}
                   />
                 ))}
               </SidebarMenu>
@@ -589,6 +795,29 @@ export function FileTree(props: FileTreeProps) {
           </SidebarGroup>
         ) : (
           <>
+            {feedSources.length && tree ? (
+              <SidebarGroup className="pb-0">
+                <SidebarMenu>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      size="sm"
+                      onClick={() => setFeedOpen(true)}
+                      title={
+                        changesSource
+                          ? `Files changed since you last viewed them${gitSource ? ", and uncommitted files" : ""} (w)`
+                          : "Files with uncommitted changes (w)"
+                      }
+                    >
+                      <SparklesIcon className="text-sky-600 dark:text-sky-400" />
+                      <span>What&apos;s new</span>
+                    </SidebarMenuButton>
+                    {feedCount ? (
+                      <SidebarMenuBadge className="text-sky-700 dark:text-sky-300">{feedCount.toLocaleString()}</SidebarMenuBadge>
+                    ) : null}
+                  </SidebarMenuItem>
+                </SidebarMenu>
+              </SidebarGroup>
+            ) : null}
             {recent.length ? (
               <SidebarGroup>
                 <SidebarGroupLabel className="gap-1.5">
@@ -604,6 +833,7 @@ export function FileTree(props: FileTreeProps) {
                         onOpen={onOpen}
                         hint={formatRelative(f.mtime)}
                         ops={ops}
+                        changed={changed.has(f.path)}
                       />
                     ))}
                   </SidebarMenu>
@@ -621,7 +851,13 @@ export function FileTree(props: FileTreeProps) {
                 )}
                 <SidebarGroupContent>
                   <SidebarMenu className="gap-0.5">
-                    <DirChildren node={root} ctx={ctx} />
+                    {changedOnly && root.fileCount === 0 ? (
+                      <li className="px-2 py-1 text-xs text-muted-foreground italic">
+                        No files changed since you last viewed them.
+                      </li>
+                    ) : (
+                      <DirChildren node={root} ctx={ctx} />
+                    )}
                   </SidebarMenu>
                 </SidebarGroupContent>
               </SidebarGroup>

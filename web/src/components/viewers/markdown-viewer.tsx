@@ -7,12 +7,15 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import rehypeSlug from "rehype-slug";
 import { CheckIcon, CopyIcon, ImageOffIcon, LinkIcon, ShieldOffIcon } from "lucide-react";
+import { useFileChange } from "@/components/changes/changes-context";
 import { TocInline, TocPanel, type TocHeading } from "@/components/toc";
 import { useHighlight } from "@/hooks/use-highlight";
 import { useRoute } from "@/hooks/use-route";
 import { api, errorMessage, rawUrl } from "@/lib/api";
+import { blockMarks, normalizeText, type ChangeMarks } from "@/lib/diff";
 import { isExternal, isWebLink, resolveLink, viewerHref } from "@/lib/paths";
 import { highlight, langForFence } from "@/lib/shiki";
+import { rehypeChangeMarks } from "@/lib/rehype-change-marks";
 import { stickyScroll } from "@/lib/sticky-scroll";
 import { parseLineHash } from "./code-viewer";
 import { useAsync, ViewerError, ViewerLoading, type ViewerProps } from "./common";
@@ -32,6 +35,12 @@ function hastText(node: HastLike | undefined): string {
   if (!node) return "";
   if (node.type === "text") return node.value ?? "";
   return (node.children ?? []).map(hastText).join("");
+}
+
+/** "Changed since viewed" attribute of a top-level block (see lib/rehype-change-marks.ts). */
+function changeAttrs(node: HastLike | undefined): { "data-change": string } | null {
+  const change = node?.properties?.dataChange;
+  return change == null ? null : { "data-change": String(change) };
 }
 
 function codeLang(node: HastLike | undefined): string {
@@ -278,15 +287,22 @@ export function markdownComponents(docPath: string, opts: MarkdownComponentOptio
     pre({ node, children }) {
       const n = node as unknown as HastLike | undefined;
       const codeEl = n?.children?.find((c) => c.type === "element" && c.tagName === "code");
-      if (!codeEl) return <pre>{children as ReactNode}</pre>;
+      const attrs = changeAttrs(n);
+      if (!codeEl) return <pre {...attrs}>{children as ReactNode}</pre>;
       const lang = codeLang(codeEl);
       const code = hastText(codeEl).replace(/\n$/, "");
-      if (lang.toLowerCase() === "mermaid") return <MermaidDiagram source={code} theme={print ? "light" : undefined} print={print} />;
-      return <CodeBlock code={code} lang={lang} />;
+      const block =
+        lang.toLowerCase() === "mermaid" ? (
+          <MermaidDiagram source={code} theme={print ? "light" : undefined} print={print} />
+        ) : (
+          <CodeBlock code={code} lang={lang} />
+        );
+      // The block replaces the <pre>: carry the change marks on a wrapper.
+      return attrs ? <div {...attrs}>{block}</div> : block;
     },
-    table({ children, node: _node, ...rest }) {
+    table({ children, node, ...rest }) {
       return (
-        <div className="my-4 w-full overflow-x-auto">
+        <div className="my-4 w-full overflow-x-auto" {...changeAttrs(node as unknown as HastLike | undefined)}>
           <table {...rest} className="my-0">
             {children}
           </table>
@@ -299,13 +315,23 @@ export function markdownComponents(docPath: string, opts: MarkdownComponentOptio
 export const ARTICLE_CLASS =
   "markdown-body prose prose-neutral max-w-none dark:prose-invert prose-headings:scroll-mt-20 prose-a:break-words prose-pre:bg-transparent prose-img:my-4 prose-table:text-sm prose-th:px-3 prose-td:px-3 prose-code:before:content-none prose-code:after:content-none [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-muted [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:py-0.5 [&_:not(pre)>code]:text-[0.85em] [&_:not(pre)>code]:font-normal";
 
-export function MarkdownMarkup({ text, components }: { text: string; components: Components }) {
+export function MarkdownMarkup({
+  text,
+  components,
+  marks,
+}: {
+  text: string;
+  components: Components;
+  /** blocks changed since the last view; the print page never passes these */
+  marks?: ChangeMarks | null;
+}) {
+  const rehypePlugins = useMemo<NonNullable<ComponentProps<typeof ReactMarkdown>["rehypePlugins"]>>(
+    // The marks plugin runs after sanitize, which would strip its data attributes.
+    () => [rehypeRaw, [rehypeSanitize, defaultSchema], rehypeSlug, ...(marks ? [rehypeChangeMarks(marks)] : [])],
+    [marks],
+  );
   return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      rehypePlugins={[rehypeRaw, [rehypeSanitize, defaultSchema], rehypeSlug]}
-      components={components}
-    >
+    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins} components={components}>
       {text}
     </ReactMarkdown>
   );
@@ -318,7 +344,20 @@ export function MarkdownViewer({ file, reloadKey }: ViewerProps) {
   const { hash, hl, hll, navigate, setHash } = useRoute();
   const articleRef = useRef<HTMLElement>(null);
   const [headings, setHeadings] = useState<TocHeading[]>([]);
+  const [words, setWords] = useState(0);
   const docPath = file.path;
+  const fc = useFileChange();
+  const changed = fc?.changed ?? false;
+  const markdownDiff = fc?.markdownDiff ?? null;
+  const comparedText = fc?.currentText ?? null;
+  // Highlights only when the controller compared the very text shown here (both fetch it).
+  const marks = useMemo(
+    () =>
+      changed && markdownDiff && comparedText !== null && data && normalizeText(data.text) === normalizeText(comparedText)
+        ? blockMarks(markdownDiff)
+        : null,
+    [changed, markdownDiff, comparedText, data],
+  );
 
   const scrollToId = useCallback((id: string) => {
     const el = document.getElementById(id) ?? document.getElementById(`user-content-${id}`);
@@ -348,6 +387,10 @@ export function MarkdownViewer({ file, reloadKey }: ViewerProps) {
       level: Number(el.tagName.slice(1)),
     }));
     setHeadings(hs);
+    // Word count of the prose: code blocks and diagrams are left out.
+    const prose = root.cloneNode(true) as HTMLElement;
+    prose.querySelectorAll("pre, svg").forEach((el) => el.remove());
+    setWords((prose.textContent ?? "").split(/\s+/).filter(Boolean).length);
   }, [data]);
 
   // Scroll to the heading named in the URL hash (initial load and back/forward).
@@ -385,12 +428,12 @@ export function MarkdownViewer({ file, reloadKey }: ViewerProps) {
   return (
     <div className="flex justify-center gap-8 px-4 py-6 md:px-8">
       <div className="print-area min-w-0 max-w-4xl flex-1">
-        <TocInline headings={headings} onSelect={selectHeading} />
+        <TocInline headings={headings} words={words} onSelect={selectHeading} />
         <article ref={articleRef} className={ARTICLE_CLASS}>
-          <MarkdownMarkup text={data.text} components={components} />
+          <MarkdownMarkup text={data.text} components={components} marks={marks} />
         </article>
       </div>
-      <TocPanel headings={headings} onSelect={selectHeading} />
+      <TocPanel headings={headings} words={words} onSelect={selectHeading} />
     </div>
   );
 }

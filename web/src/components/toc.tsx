@@ -73,8 +73,19 @@ function TocList({
   );
 }
 
+function wordLabel(words: number): string {
+  return `${words.toLocaleString()} word${words === 1 ? "" : "s"}`;
+}
+
+interface TocProps {
+  headings: TocHeading[];
+  /** word count of the document, shown next to the title */
+  words?: number;
+  onSelect: (id: string) => void;
+}
+
 /** Sticky side panel on wide screens. */
-export function TocPanel({ headings, onSelect }: { headings: TocHeading[]; onSelect: (id: string) => void }) {
+export function TocPanel({ headings, words, onSelect }: TocProps) {
   const active = useActiveHeading(headings);
   if (headings.length < 2) return null;
   return (
@@ -84,6 +95,9 @@ export function TocPanel({ headings, onSelect }: { headings: TocHeading[]; onSel
     >
       <div className="mb-2 flex items-center gap-1.5 px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         <ListIcon className="size-3.5" /> On this page
+        {words ? (
+          <span className="ml-auto font-normal tracking-normal normal-case">{wordLabel(words)}</span>
+        ) : null}
       </div>
       <TocList headings={headings} active={active} onSelect={onSelect} />
     </nav>
@@ -91,7 +105,7 @@ export function TocPanel({ headings, onSelect }: { headings: TocHeading[]; onSel
 }
 
 /** Collapsible block shown above the article on narrower screens. */
-export function TocInline({ headings, onSelect }: { headings: TocHeading[]; onSelect: (id: string) => void }) {
+export function TocInline({ headings, words, onSelect }: TocProps) {
   const [open, setOpen] = useState(false);
   if (headings.length < 2) return null;
   return (
@@ -100,6 +114,7 @@ export function TocInline({ headings, onSelect }: { headings: TocHeading[]; onSe
         <ChevronRightIcon className={cn("size-4 transition-transform", open && "rotate-90")} />
         Contents
         <span className="text-muted-foreground">({headings.length})</span>
+        {words ? <span className="ml-auto text-xs font-normal text-muted-foreground">{wordLabel(words)}</span> : null}
       </CollapsibleTrigger>
       <CollapsibleContent className="max-h-80 overflow-y-auto border-t px-1 py-2">
         <TocList headings={headings} active={null} onSelect={(id) => onSelect(id)} />

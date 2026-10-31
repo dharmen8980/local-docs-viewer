@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "@/lib/api";
+import type { SeenEvent } from "@/lib/seen-store";
 
 export type EventsStatus = "connecting" | "open" | "reconnecting";
 
@@ -11,20 +12,24 @@ export type EventsStatus = "connecting" | "open" | "reconnecting";
  * can resync anything it may have missed). Reconnects with backoff when the
  * browser gives up on its own retry; `onClosed` runs each time it gives up (e.g. the
  * server answered 409 "no folder selected"), so the caller can re-check the config.
+ * `onSeen` gets the `seen` events (changes history written by any tab or browser).
  */
 export function useEvents(
   onChange: (ev: ChangeEvent) => void,
   onReconnect?: () => void,
   onClosed?: () => void,
+  onSeen?: (ev: SeenEvent) => void,
 ): EventsStatus {
   const [status, setStatus] = useState<EventsStatus>("connecting");
   const changeRef = useRef(onChange);
   const reconnectRef = useRef(onReconnect);
   const closedRef = useRef(onClosed);
+  const seenRef = useRef(onSeen);
   useEffect(() => {
     changeRef.current = onChange;
     reconnectRef.current = onReconnect;
     closedRef.current = onClosed;
+    seenRef.current = onSeen;
   });
 
   useEffect(() => {
@@ -54,6 +59,14 @@ export function useEvents(
             renames: data.renames ?? [],
             dirs_changed: Boolean(data.dirs_changed),
           });
+        } catch {
+          /* ignore malformed event */
+        }
+      });
+      es.addEventListener("seen", (msg) => {
+        try {
+          const data = JSON.parse((msg as MessageEvent<string>).data) as SeenEvent;
+          if (Array.isArray(data.paths)) seenRef.current?.({ paths: data.paths, client: data.client ?? null, cleared: data.cleared === true });
         } catch {
           /* ignore malformed event */
         }

@@ -22,8 +22,12 @@ export interface AppConfig {
   no_root?: boolean;
   /** the folder can be switched from the UI (false with --lock-root) */
   root_switch_enabled?: boolean;
-  /** Per-launch token for mutating /api/roots/* (same-site requests only). */
+  /** Per-launch token for mutating /api/roots/* and /api/seen/* (same-site requests only). */
   root_token?: string;
+  /** the server keeps the "changed since you last looked" history for this folder (/api/seen*) */
+  seen_enabled?: boolean;
+  /** the folder is inside a git work tree and git is usable: /api/git/* (read-only) */
+  git_enabled?: boolean;
   repo_prefix: string;
   search_max_bytes: number;
   version: string | number;
@@ -136,6 +140,83 @@ export interface ChangeEvent {
   dirs_changed: boolean;
 }
 
+/** M modified, A added (staged, not in HEAD), D deleted, R renamed, ?? untracked, U conflict. */
+export type GitStatusCode = "M" | "A" | "D" | "R" | "??" | "U";
+
+export interface GitStatusFile {
+  path: string;
+  status: GitStatusCode;
+  /** renames: the path in the last commit (only when it is visible in this folder) */
+  origPath: string | null;
+  /** lines against the last commit; null when binary or not counted (too large, too many files) */
+  added: number | null;
+  removed: number | null;
+  binary: boolean;
+  kind: FileKind | null;
+  /** null for deleted files */
+  mtime: number | null;
+  size: number | null;
+}
+
+export interface GitStatusResponse {
+  /** abbreviated HEAD commit; null before the first commit */
+  head: string | null;
+  branch: string | null;
+  /** the root inside the work tree, "" or "sub/dir/" */
+  prefix: string;
+  /** newest change first; deleted files last */
+  files: GitStatusFile[];
+  /** more changed files than the server lists */
+  truncated: boolean;
+}
+
+export interface GitHeadBlob {
+  oid: string;
+  size: number;
+  /** null when binary or too large */
+  text: string | null;
+  binary: boolean;
+  tooLarge: boolean;
+}
+
+export interface GitFileResponse {
+  path: string;
+  /** null: no uncommitted change */
+  status: GitStatusCode | null;
+  origPath: string | null;
+  /** the version in the last commit; null when the file is not in it */
+  head: GitHeadBlob | null;
+  headCommit: string | null;
+  exists: boolean;
+}
+
+export interface GitBlameCommit {
+  short: string;
+  author: string;
+  /** unix seconds */
+  authorTime: number;
+  summary: string;
+  /** the line is not committed yet */
+  uncommitted: boolean;
+}
+
+export interface GitBlameLine {
+  line: number;
+  commit: string;
+  text: string;
+}
+
+export interface GitBlameResponse {
+  path: string;
+  start: number;
+  /** lines in the file */
+  total: number;
+  /** false: the file is not in any commit yet */
+  tracked: boolean;
+  lines: GitBlameLine[];
+  commits: Record<string, GitBlameCommit>;
+}
+
 export class ApiError extends Error {
   status: number;
   body: unknown;
@@ -206,6 +287,10 @@ export const api = {
     getJson<TextResponse>(`/api/text${qs({ path, line })}`, signal),
   csv: (path: string, signal?: AbortSignal) => getJson<CsvResponse>(`/api/csv${qs({ path })}`, signal),
   xlsx: (path: string, signal?: AbortSignal) => getJson<XlsxResponse>(`/api/xlsx${qs({ path })}`, signal),
+  gitStatus: (signal?: AbortSignal) => getJson<GitStatusResponse>("/api/git/status", signal),
+  gitFile: (path: string, signal?: AbortSignal) => getJson<GitFileResponse>(`/api/git/file${qs({ path })}`, signal),
+  gitBlame: (path: string, start: number, count: number, signal?: AbortSignal) =>
+    getJson<GitBlameResponse>(`/api/git/blame${qs({ path, start, count })}`, signal),
   search: (
     params: { q: string; folder?: string; types?: string[]; limit?: number },
     signal?: AbortSignal,

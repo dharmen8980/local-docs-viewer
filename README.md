@@ -29,6 +29,16 @@ What it does:
   best matches that line.
 - Live updates through Server-Sent Events: new, modified, renamed and deleted
   files and folders.
+- Changed since you last looked: files that changed since you last opened them
+  get a dot in the sidebar (and their folders too). Opening one shows what
+  changed, with highlighted markdown blocks or a line diff. A **What's new**
+  feed in the sidebar lists them all, newest first, with what changed in each.
+  The history is kept in the server's data dir, never in the folder; see
+  [Changes](docs/changes.md).
+- Read-only git awareness, when the folder is inside a git repository: what
+  changed since the last commit (same banner, highlights and diff), an
+  **Uncommitted** list in What's new with M/A/D/R/?? and +/- lines, and blame.
+  Nothing is ever written to the repository; see [Git](docs/git.md).
 - Deep links (`/?p=<path>#<heading>` or `#L<line>`), light/dark themes and a
   print stylesheet for markdown.
 - **Download PDF** for markdown and `.mmd` files: a properly paginated PDF
@@ -62,6 +72,8 @@ uv run viewer --root ~/notes   # or start on a given folder
 | [Development](docs/development.md) | Prerequisites, install, build and run, dev mode with hot reload, tests |
 | [Configuration](docs/configuration.md) | Flags and environment variables; choosing and switching folders; `/api/roots` |
 | [Editing](docs/editing.md) | `--allow-edit`, history, trash, the recovery data dir, backups, limits, how writes are protected |
+| [Changes](docs/changes.md) | "Changed since you last looked": dots, the filter, the What's new feed, the banner, highlights, where the history is kept |
+| [Git](docs/git.md) | Read-only git views: since last commit, the Uncommitted list, blame; which git is used; `/api/git/*` |
 | [PDF export](docs/pdf-export.md) | How **Download PDF** renders markdown and mermaid |
 | [Desktop app](docs/desktop.md) | Installing, first launch, data and logs, building the app, desktop mode |
 | [Security model](docs/security.md) | What the server allows, refuses and why |
